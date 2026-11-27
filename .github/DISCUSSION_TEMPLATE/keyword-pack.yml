@@ -1,0 +1,57 @@
+title: "[پک کلیدواژه] نام پک شما"
+labels:
+  - keyword-pack
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ### اشتراک‌گذاری پک کلیدواژه و سرشماره سپر پیامک (SMSShield)
+        کد پک ساخته‌شده از بخش **«پک‌ها ← استودیو پک من»** در اپلیکیشن را اینجا قرار دهید تا سایر کاربران بتوانند آن را بررسی، وارد و لایک 👍 کنند.
+  - type: input
+    id: pack_name
+    attributes:
+      label: نام پک (Pack Name)
+      placeholder: "مثلاً: پک ضدتبلیغات کلینیک و زیبایی"
+    validations:
+      required: true
+  - type: input
+    id: author_name
+    attributes:
+      label: نام یا نام مستعار سازنده (Author)
+      placeholder: "نام مستعار شما"
+    validations:
+      required: true
+  - type: dropdown
+    id: category
+    attributes:
+      label: دسته‌بندی (Category)
+      options:
+        - "بانکی و جشنواره‌ای"
+        - "فروشگاهی"
+        - "کلینیک و خدمات"
+        - "املاک، وام و سرمایه‌گذاری"
+        - "عمومی"
+    validations:
+      required: true
+  - type: input
+    id: caught_count
+    attributes:
+      label: تعداد پیامک‌های تبلیغاتی شکارشده (Caught Spam Count)
+      placeholder: "مثلاً: 45"
+    validations:
+      required: false
+  - type: textarea
+    id: description
+    attributes:
+      label: توضیحات کوتاه (Description)
+      placeholder: "این پک برای مسدود کردن چه نوع پیامک‌هایی مناسب است؟"
+    validations:
+      required: true
+  - type: textarea
+    id: share_code
+    attributes:
+      label: کد اشتراک‌گذاری پک (Share Code)
+      description: "کد شروع‌شده با SMSSHIELD-PACK:v1:... را اینجا جای‌گذاری کنید"
+      placeholder: "SMSSHIELD-PACK:v1:..."
+    validations:
+      required: true

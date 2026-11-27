@@ -9,14 +9,13 @@ object PersianNormalizer {
         Regex("[\\u200B\\u200E\\u200F\\uFEFF\\u0610-\\u061A\\u064B-\\u065F\\u0670\\u06D6-\\u06ED]")
 
     private val MULTI_SPACE_REGEX = Regex("\\s+")
+    private val SENDER_STRIP_REGEX = Regex("[\\s\\-()_]+")
 
     fun normalize(input: String): String {
         if (input.isEmpty()) return ""
 
-        // NFKC folds Arabic presentation forms and other compatibility variants
-        // before the explicit Persian/Arabic character mapping below.
-        val compatibilityNormalized = Normalizer.normalize(input, Normalizer.Form.NFKC)
-        val cleaned = INVISIBLE_AND_DIACRITICS_REGEX.replace(compatibilityNormalized, "")
+        val nfkc = Normalizer.normalize(input, Normalizer.Form.NFKC)
+        val cleaned = INVISIBLE_AND_DIACRITICS_REGEX.replace(nfkc, "")
         val sb = StringBuilder(cleaned.length)
 
         for (ch in cleaned) {
@@ -38,6 +37,14 @@ object PersianNormalizer {
     }
 
     fun normalizeSender(sender: String): String {
-        return normalize(sender).replace(" ", "")
+        val compact = SENDER_STRIP_REGEX.replace(normalize(sender), "")
+        if (compact.isEmpty()) return ""
+
+        return when {
+            compact.startsWith("+98") && compact.length - 3 >= 4 -> compact.substring(3)
+            compact.startsWith("0098") && compact.length - 4 >= 4 -> compact.substring(4)
+            compact.startsWith("98") && compact.length - 2 >= 4 -> compact.substring(2)
+            else -> compact
+        }
     }
 }

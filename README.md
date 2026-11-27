@@ -7,34 +7,32 @@
 
 ## English Overview
 
-**SMSShield** protects Android users from Iranian promotional/spam SMS notifications **without requesting `READ_SMS`, `RECEIVE_SMS`, `READ_CONTACTS`, or `INTERNET` permissions**. Instead, it uses Android's `NotificationListenerService` to inspect incoming SMS notifications locally on-device, classify them with a pure Kotlin Persian/Iranian heuristic scoring engine, and safely quarantine or dismiss spam notifications.
+**SMSShield** protects Android users from Iranian promotional/spam SMS notifications **without requesting `READ_SMS`, `RECEIVE_SMS`, `READ_CONTACTS`, external storage, or `INTERNET` permissions**. Instead, it uses Android's `NotificationListenerService` to inspect incoming SMS notifications locally on-device, classify them with a pure Kotlin Persian/Iranian heuristic scoring engine, and safely quarantine or dismiss spam notifications.
 
 ### Key Highlights
-- **Zero Sensitive Permissions:** Only declares `BIND_NOTIFICATION_LISTENER_SERVICE`. Completely offline (no `INTERNET` permission).
+- **Zero Sensitive Permissions:** Only declares `BIND_NOTIFICATION_LISTENER_SERVICE`. 100% offline (no `INTERNET` or storage permissions; uses Android Storage Access Framework for `.json` files).
 - **Safe-First Architecture:**
   - **Learning Mode (default on first launch):** Logs `SPAM` and `SUSPICIOUS` messages to the local Quarantine without dismissing any notification.
-  - **Active Mode:** Dismisses confirmed `SPAM` notifications while preserving OTPs, bank transactions, whitelisted senders, truncated previews, and legitimate service messages.
-- **Iranian SMS Scoring Engine (`:core-engine`):**
-  - Full Persian/Arabic character, digit, ZWNJ, and diacritic normalization.
-  - Hard safe exceptions for OTP/verification codes, bank transactions (`ریال`/`تومان`), manual whitelist, and truncated previews.
-  - Weighted scoring for `لغو 11`, bulk gateway senders (`1000`/`2000`/`3000`/`5000`/`9000`), URLs/short links, phone numbers, capped promotional keywords (root-matched to prevent double-counting), custom user keywords, and negative service weights.
-- **Minimal Persian RTL UI:** Built with Jetpack Compose (Material 3) across 3 screens: Dashboard (`داشبورد`), Quarantine (`قرنطینه`), and Settings (`تنظیمات`).
+  - **Active Mode:** Dismisses confirmed `SPAM` notifications with thread-safe `sbn.key` race protection while preserving OTPs, bank transactions, whitelisted senders, truncated previews, and legitimate service messages.
+- **Sender Blocking (`EXACT` & `PREFIX`):** Block Iranian gateways/senders (automatically normalizing `+98`, `0098`, `98`, and Persian/Arabic digits) directly from Quarantine or Settings, with live per-rule hit counters.
+- **Local Backup & Restore:** Export and restore all custom keywords, blocked senders, whitelist entries, and sensitivity settings to/from a local `.json` file via Android's Storage Access Framework (`CreateDocument` / `OpenDocument`).
+- **Community Keyword Packs & Gamified Shield Studio:** Track your total spam caught, earn Shield Contributor ranks, export `.smsshield.json` or `SMSSHIELD-PACK:v1:...` share codes, import curated offline starter packs or community packs with a mandatory checkbox preview, and share packs on GitHub Discussions.
 
-### Build & Download APK
-- Every push to `main` runs unit tests (`:core-engine:test`) and builds a Debug APK via GitHub Actions (**Android CI & APK Build**).
-- Download the latest APK from the **Actions** tab → latest green **Android CI & APK Build** run → **Artifacts** → `SMSShield-Debug-APK`.
+### Persistent Signing & Seamless APK Upgrades
+- Configure `KEYSTORE_BASE64`, `KEYSTORE_PASSWORD`, `KEY_ALIAS`, and `KEY_PASSWORD` in **Repository Settings → Secrets and variables → Actions**.
+- Once configured, **every** tagged release (`v*`, including `-alpha` and `-beta` pre-releases) is built with `assembleRelease` and signed with your persistent keystore, allowing seamless in-place APK upgrades without signature conflicts or data loss.
 
 ---
 
 ## معرفی فارسی
 
-**سپر پیامک (SMSShield)** یک فیلتر کاملاً آفلاین و سبک برای مدیریت و حذف اعلان‌های پیامک‌های تبلیغاتی در ایران است که **هیچ‌گونه دسترسی `INTERNET`، `READ_SMS`، `RECEIVE_SMS` یا `READ_CONTACTS` درخواست نمی‌کند**. این برنامه صرفاً از طریق سرویس `NotificationListenerService` اعلان‌های پیامک را به‌صورت محلی روی گوشی تحلیل کرده و پیامک‌های تبلیغاتی را شناسایی می‌کند.
+**سپر پیامک (SMSShield)** یک فیلتر کاملاً آفلاین و سبک برای مدیریت و حذف اعلان‌های پیامک‌های تبلیغاتی در ایران است که **هیچ‌گونه دسترسی `INTERNET`، `READ_SMS`، `RECEIVE_SMS`، `READ_CONTACTS` یا حافظه خارجی درخواست نمی‌کند**.
 
-### ویژگی‌های کلیدی
-- **حریم خصوصی حداکثری:** بدون دسترسی اینترنت و بدون دسترسی مستقیم به صندوق پیامک‌ها یا مخاطبین.
-- **حالت یادگیری (Learning Mode):** در اولین اجرا فعال است و بدون حذف اعلان‌ها، پیامک‌های تبلیغاتی و مشکوک را در بخش قرنطینه ثبت می‌کند تا از دقت فیلتر مطمئن شوید.
-- **سپر فعال (Active Mode):** اعلان پیامک‌های تبلیغاتی قطعی را حذف می‌کند، در حالی که رمزهای پویا (OTP)، تراکنش‌های بانکی، فرستنده‌های لیست مجاز، متن‌های ناقص و پیامک‌های خدماتی (سفارش، مرسوله، تحویل، قبض و...) همواره ایمن می‌مانند.
-- **رابط کاربری فارسی و راست‌به‌چپ (RTL):** طراحی‌شده با Jetpack Compose و Material 3 شامل سه صفحه: داشبورد، قرنطینه و تنظیمات.
+### ویژگی‌های جدید نسخه v0.3.0
+- **بلاک سرشماره (دقیق و پیشوندی):** امکان مسدودسازی سرشماره‌ها به‌صورت تطابق دقیق (`550021`) یا پیشوندی (`550021*`) از تنظیمات یا با یک لمس در صفحه قرنطینه، همراه با یکسان‌سازی خودکار `+98` / `0098` / `98` و اعداد فارسی.
+- **پشتیبان‌گیری و بازیابی محلی:** ذخیره و بازیابی کلیدواژه‌ها، سرشماره‌های مسدودشده، لیست مجاز و آستانه حساسیت در فایل `.json` بدون نیاز به دسترسی حافظه یا اینترنت.
+- **پک‌های کلیدواژه و استودیو پک من:** مشاهده آمار شکار اسپم و رتبه کاربری، ساخت و اشتراک‌گذاری پک با کد `SMSSHIELD-PACK:v1:...` یا فایل `.smsshield.json`، وارد کردن پک‌های آماده آفلاین یا پک‌های کاربران با پیش‌نمایش تیک‌دار (Checkbox) و تشخیص خودکار موارد تکراری.
+- **به‌روزرسانی بدون حذف برنامه:** با تنظیم کلیدهای امضای پایدار (`KEYSTORE_BASE64` و رمزها) در GitHub Secrets، تمام نسخه‌های تگ‌شده (حتی پیش‌انتشارهای alpha/beta) با یک کلید ثابت امضا می‌شوند تا آپدیت مستقیم روی نسخه قبلی بدون از دست رفتن داده‌ها انجام شود.
 
 ## License
 MIT License — see [LICENSE](LICENSE).

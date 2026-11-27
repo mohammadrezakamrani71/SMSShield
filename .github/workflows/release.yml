@@ -93,10 +93,10 @@ jobs:
           files: SMSShield-${{ github.ref_name }}.apk
           body: |
             ## SMSShield ${{ github.ref_name }}
-            Signed release build of SMSShield — offline, zero-permission Iranian SMS spam notification filter for Android.
+            Signed build using the persistent release keystore — supports seamless in-place APK upgrades without losing your local rules or database.
 
             ## سپر پیامک نسخه ${{ github.ref_name }}
-            نسخه امضاشده سپر پیامک — فیلتر آفلاین و بدون دسترسی پیامک برای حذف اعلان‌های پیامک‌های تبلیغاتی ایرانی در اندروید.
+            نسخه امضاشده با کلید پایدار انتشار — قابلیت به‌روزرسانی مستقیم روی نسخه قبلی بدون نیاز به حذف برنامه و بدون از دست رفتن تنظیمات و داده‌ها.
 
       - name: Publish Debug Pre-Release
         if: steps.mode.outputs.has_secrets == 'false'
@@ -108,7 +108,7 @@ jobs:
           files: SMSShield-${{ github.ref_name }}-debug.apk
           body: |
             ## SMSShield ${{ github.ref_name }} (Debug Test Build)
-            **Note:** This is an unsigned debug test build published because release signing secrets are not yet configured.
+            **Upgrade Warning:** Release signing secrets are not yet configured, so this is an unsigned debug test build signed with an ephemeral runner key. **Debug builds cannot upgrade in-place over prior debug builds** — export a local backup (`Settings → Backup & Restore`) before reinstalling.
 
             ## سپر پیامک نسخه ${{ github.ref_name }} (نسخه آزمایشی Debug)
-            **توجه:** این فایل یک نسخه آزمایشی (Debug) است و با کلید انتشار رسمی امضا نشده است.
+            **هشدار به‌روزرسانی:** به‌دلیل تنظیم نشدن کلید امضای پایدار، این فایل یک نسخه آزمایشی Debug است و **امکان نصب مستقیم روی نسخه Debug قبلی را ندارد**. پیش از حذف و نصب مجدد، از بخش «تنظیمات ← پشتیبان‌گیری و بازیابی» فایل پشتیبان تهیه کنید.

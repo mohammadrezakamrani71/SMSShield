@@ -56,8 +56,14 @@ interface WhitelistDao {
     @Delete
     suspend fun delete(entity: WhitelistEntity)
 
+    @Query("DELETE FROM whitelist_senders WHERE normalizedSender = :normalizedSender")
+    suspend fun deleteByNormalizedSender(normalizedSender: String)
+
     @Query("SELECT * FROM whitelist_senders ORDER BY addedAt DESC")
     fun observeAll(): Flow<List<WhitelistEntity>>
+
+    @Query("SELECT * FROM whitelist_senders")
+    suspend fun getAll(): List<WhitelistEntity>
 
     @Query("SELECT normalizedSender FROM whitelist_senders")
     suspend fun getAllNormalizedSenders(): List<String>
@@ -75,6 +81,40 @@ interface CustomRuleDao {
     @Query("SELECT * FROM custom_rules ORDER BY id DESC")
     fun observeAll(): Flow<List<CustomRuleEntity>>
 
+    @Query("SELECT * FROM custom_rules")
+    suspend fun getAllRules(): List<CustomRuleEntity>
+
     @Query("SELECT * FROM custom_rules WHERE isEnabled = 1")
     suspend fun getEnabledRules(): List<CustomRuleEntity>
+
+    @Query("UPDATE custom_rules SET hitCount = hitCount + 1 WHERE keyword = :keyword")
+    suspend fun incrementHitCountByKeyword(keyword: String)
+
+    @Query("SELECT COALESCE(SUM(hitCount), 0) FROM custom_rules")
+    fun observeTotalHits(): Flow<Int>
+}
+
+@Dao
+interface BlockedSenderDao {
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(entity: BlockedSenderEntity): Long
+
+    @Delete
+    suspend fun delete(entity: BlockedSenderEntity)
+
+    @Query("DELETE FROM blocked_senders WHERE normalizedPattern = :normalizedPattern")
+    suspend fun deleteByNormalizedPattern(normalizedPattern: String)
+
+    @Query("SELECT * FROM blocked_senders ORDER BY addedAt DESC")
+    fun observeAll(): Flow<List<BlockedSenderEntity>>
+
+    @Query("SELECT * FROM blocked_senders")
+    suspend fun getAll(): List<BlockedSenderEntity>
+
+    @Query("UPDATE blocked_senders SET hitCount = hitCount + 1 WHERE normalizedPattern = :normalizedPattern")
+    suspend fun incrementHitCount(normalizedPattern: String)
+
+    @Query("SELECT COALESCE(SUM(hitCount), 0) FROM blocked_senders")
+    fun observeTotalHits(): Flow<Int>
 }

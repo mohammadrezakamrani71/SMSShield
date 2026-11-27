@@ -1,6 +1,8 @@
 package com.smsshield.engine
 
+import com.smsshield.engine.model.BlockedSenderRule
 import com.smsshield.engine.model.ClassificationResult
+import com.smsshield.engine.model.SenderMatchType
 import com.smsshield.engine.model.SmsInput
 import com.smsshield.engine.model.SmsVerdict
 
@@ -12,19 +14,13 @@ class SpamClassifier(
         input: SmsInput,
         whitelistedSenders: Set<String> = emptySet(),
         customRules: List<CustomKeywordRule> = emptyList(),
-        spamThreshold: Int = SpamRules.DEFAULT_SPAM_THRESHOLD
+        spamThreshold: Int = SpamRules.DEFAULT_SPAM_THRESHOLD,
+        blockedSenders: List<BlockedSenderRule> = emptyList()
     ): ClassificationResult {
-        if (input.isPossiblyTruncated) {
-            return ClassificationResult(
-                verdict = SmsVerdict.SAFE,
-                score = 0,
-                reasons = listOf("استثنای ایمن: متن پیام احتمالاً ناقص است")
-            )
-        }
-
         val normalizedSender = PersianNormalizer.normalizeSender(input.sender)
         val normalizedBody = PersianNormalizer.normalize(input.body)
 
+        // Precedence 1: Manual user whitelist
         val normalizedWhitelist = whitelistedSenders
             .map { PersianNormalizer.normalizeSender(it) }
             .filter { it.isNotEmpty() }
@@ -35,6 +31,37 @@ class SpamClassifier(
                 verdict = SmsVerdict.SAFE,
                 score = 0,
                 reasons = listOf("استثنای ایمن: فرستنده در لیست مجاز کاربر است")
+            )
+        }
+
+        // Precedence 2: Manual user sender blacklist (applies even if body is truncated)
+        if (normalizedSender.isNotEmpty()) {
+            for (rule in blockedSenders) {
+                val normalizedPattern = PersianNormalizer.normalizeSender(
+                    rule.pattern.trim().removeSuffix("*")
+                )
+                if (normalizedPattern.isEmpty()) continue
+                val matched = when (rule.matchType) {
+                    SenderMatchType.EXACT -> normalizedSender == normalizedPattern
+                    SenderMatchType.PREFIX -> normalizedSender.startsWith(normalizedPattern)
+                }
+                if (matched) {
+                    return ClassificationResult(
+                        verdict = SmsVerdict.SPAM,
+                        score = SpamRules.MAX_TOTAL_SCORE,
+                        reasons = listOf("سرشماره مسدودشده توسط کاربر (${rule.pattern})"),
+                        matchedBlockedSenderPattern = normalizedPattern
+                    )
+                }
+            }
+        }
+
+        // Precedence 3: Truncation safety guard
+        if (input.isPossiblyTruncated) {
+            return ClassificationResult(
+                verdict = SmsVerdict.SAFE,
+                score = 0,
+                reasons = listOf("استثنای ایمن: متن پیام احتمالاً ناقص است")
             )
         }
 
@@ -70,7 +97,8 @@ class SpamClassifier(
         return ClassificationResult(
             verdict = verdict,
             score = breakdown.totalScore,
-            reasons = breakdown.reasons
+            reasons = breakdown.reasons,
+            matchedCustomKeywords = breakdown.matchedCustomKeywords
         )
     }
 

@@ -3,11 +3,18 @@ package com.smsshield.app.ui
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.smsshield.app.data.database.BackupRestoreSummary
+import com.smsshield.app.data.database.BlockedSenderEntity
 import com.smsshield.app.data.database.CustomRuleEntity
+import com.smsshield.app.data.database.PackImportSummary
 import com.smsshield.app.data.database.QuarantineEntity
 import com.smsshield.app.data.database.ShieldPreferences
 import com.smsshield.app.data.database.ShieldRepository
 import com.smsshield.app.data.database.WhitelistEntity
+import com.smsshield.engine.BlockedSenderItem
+import com.smsshield.engine.KeywordRuleItem
+import com.smsshield.engine.RulePackCodec
+import com.smsshield.engine.model.SenderMatchType
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
@@ -49,9 +56,17 @@ class ShieldViewModel(
         .observeWhitelistedSenders()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    val blockedSenders: StateFlow<List<BlockedSenderEntity>> = repository
+        .observeBlockedSenders()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
     val customRules: StateFlow<List<CustomRuleEntity>> = repository
         .observeCustomRules()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val totalUserHits: StateFlow<Int> = repository
+        .observeTotalUserHits()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
 
     fun setActiveMode(active: Boolean) {
         preferences.setActiveMode(active)
@@ -79,6 +94,18 @@ class ShieldViewModel(
         }
     }
 
+    fun addBlockedSender(pattern: String, matchType: SenderMatchType = SenderMatchType.EXACT) {
+        viewModelScope.launch {
+            repository.addBlockedSender(pattern, matchType)
+        }
+    }
+
+    fun removeBlockedSender(entity: BlockedSenderEntity) {
+        viewModelScope.launch {
+            repository.deleteBlockedSender(entity)
+        }
+    }
+
     fun addCustomRule(keyword: String, weight: Int) {
         viewModelScope.launch {
             repository.addCustomRule(keyword, weight)
@@ -89,6 +116,26 @@ class ShieldViewModel(
         viewModelScope.launch {
             repository.deleteCustomRule(entity)
         }
+    }
+
+    suspend fun exportBackupJson(): String {
+        val data = repository.exportFullBackup(preferences.getSpamThreshold())
+        return RulePackCodec.encodeBackupToJson(data)
+    }
+
+    suspend fun importBackupJson(rawJson: String): Result<BackupRestoreSummary> {
+        return RulePackCodec.decodeBackupFromJson(rawJson).mapCatching { backup ->
+            val summary = repository.restoreFullBackup(backup)
+            preferences.setSpamThreshold(summary.restoredThreshold)
+            summary
+        }
+    }
+
+    suspend fun importSelectedPackItems(
+        keywords: List<KeywordRuleItem>,
+        blockedSenders: List<BlockedSenderItem>
+    ): PackImportSummary {
+        return repository.importSelectedPackItems(keywords, blockedSenders)
     }
 
     class Factory(

@@ -56,6 +56,7 @@ class SmsNotificationListener : NotificationListenerService() {
             }
 
             val whitelistedSenders = repository.getWhitelistedSenderSet()
+            val blockedSenders = repository.getBlockedSenderRules()
             val customRules = repository.getEnabledCustomRules()
             val spamThreshold = preferences.getSpamThreshold()
             val isActiveMode = preferences.isActiveMode()
@@ -68,16 +69,23 @@ class SmsNotificationListener : NotificationListenerService() {
                 ),
                 whitelistedSenders = whitelistedSenders,
                 customRules = customRules,
-                spamThreshold = spamThreshold
+                spamThreshold = spamThreshold,
+                blockedSenders = blockedSenders
             )
 
             if (result.verdict == SmsVerdict.SAFE) {
                 return@launch
             }
 
+            repository.recordMatchHits(
+                matchedCustomKeywords = result.matchedCustomKeywords,
+                matchedBlockedSenderPattern = result.matchedBlockedSenderPattern
+            )
+
+            val explicitlyBlockedBySender = result.matchedBlockedSenderPattern != null
             val wantsDismiss = isActiveMode &&
                 result.verdict == SmsVerdict.SPAM &&
-                !parsed.isPossiblyTruncated
+                (!parsed.isPossiblyTruncated || explicitlyBlockedBySender)
 
             val shouldDismiss = if (wantsDismiss) {
                 val stillLatest = dismissalTracker.isStillLatest(sbnKey, capturedToken)

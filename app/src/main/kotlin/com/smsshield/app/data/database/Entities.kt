@@ -41,5 +41,20 @@ data class CustomRuleEntity(
     val id: Long = 0,
     val keyword: String,
     val weight: Int,
-    val isEnabled: Boolean = true
+    val isEnabled: Boolean = true,
+    val hitCount: Int = 0
+)
+
+@Entity(
+    tableName = "blocked_senders",
+    indices = [Index(value = ["normalizedPattern"], unique = true)]
+)
+data class BlockedSenderEntity(
+    @PrimaryKey(autoGenerate = true)
+    val id: Long = 0,
+    val normalizedPattern: String,
+    val displayPattern: String,
+    val matchType: String,
+    val hitCount: Int = 0,
+    val addedAt: Long
 )
