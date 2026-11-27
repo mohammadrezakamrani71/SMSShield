@@ -18,9 +18,15 @@ class SmsNotificationListener : NotificationListenerService() {
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val classifier = SpamClassifier()
+    private val dismissalTracker = PendingDismissalTracker()
 
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
         if (sbn == null) return
+
+        val sbnKey = sbn.key
+        val sbnPostTime = sbn.postTime
+        val capturedToken = dismissalTracker.recordNotification(sbnKey)
+
         val parsed = NotificationParser.parse(sbn) ?: return
 
         val app = application as? SmsShieldApplication ?: return
@@ -28,6 +34,16 @@ class SmsNotificationListener : NotificationListenerService() {
         val preferences = app.preferences
 
         serviceScope.launch {
+            val contentHash = DeduplicationHelper.buildContentHash(
+                packageName = parsed.packageName,
+                sender = parsed.sender,
+                body = parsed.body
+            )
+
+            if (repository.isDuplicateWithinWindow(contentHash, parsed.timestamp)) {
+                return@launch
+            }
+
             val dedupKey = DeduplicationHelper.buildDedupKey(
                 packageName = parsed.packageName,
                 sender = parsed.sender,
@@ -59,14 +75,27 @@ class SmsNotificationListener : NotificationListenerService() {
                 return@launch
             }
 
-            val shouldDismiss = isActiveMode &&
+            val wantsDismiss = isActiveMode &&
                 result.verdict == SmsVerdict.SPAM &&
                 !parsed.isPossiblyTruncated
+
+            val shouldDismiss = if (wantsDismiss) {
+                val stillLatest = dismissalTracker.isStillLatest(sbnKey, capturedToken)
+                val stillActiveWithSamePostTime = runCatching {
+                    activeNotifications?.any {
+                        it.key == sbnKey && it.postTime == sbnPostTime
+                    } == true
+                }.getOrDefault(false)
+                stillLatest && stillActiveWithSamePostTime
+            } else {
+                false
+            }
 
             val reasonsJson = JSONArray(result.reasons).toString()
 
             val entity = QuarantineEntity(
                 dedupKey = dedupKey,
+                contentHash = contentHash,
                 packageName = parsed.packageName,
                 sender = parsed.sender,
                 body = parsed.body,
@@ -81,9 +110,15 @@ class SmsNotificationListener : NotificationListenerService() {
             repository.insertQuarantine(entity)
 
             if (shouldDismiss) {
-                cancelNotification(sbn.key)
+                cancelNotification(sbnKey)
             }
         }
+    }
+
+    override fun onNotificationRemoved(sbn: StatusBarNotification?) {
+        super.onNotificationRemoved(sbn)
+        val key = sbn?.key ?: return
+        dismissalTracker.clear(key)
     }
 
     override fun onDestroy() {
