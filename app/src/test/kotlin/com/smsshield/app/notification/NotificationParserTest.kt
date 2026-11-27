@@ -28,6 +28,7 @@ class NotificationParserTest {
         notification: Notification,
         postTime: Long = 1_700_000_000_000L
     ): StatusBarNotification {
+        @Suppress("DEPRECATION")
         return StatusBarNotification(
             packageName,
             packageName,
@@ -35,9 +36,9 @@ class NotificationParserTest {
             null,
             1000,
             1000,
+            0,
             notification,
             Process.myUserHandle(),
-            null,
             postTime
         )
     }
