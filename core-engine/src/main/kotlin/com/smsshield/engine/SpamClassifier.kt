@@ -38,8 +38,7 @@ class SpamClassifier(
             )
         }
 
-        val hasOtpKeyword = SpamRules.OTP_KEYWORDS.any { normalizedBody.contains(it) }
-        if (hasOtpKeyword && SpamRules.OTP_CODE_REGEX.containsMatchIn(normalizedBody)) {
+        if (isSafeOtp(normalizedBody)) {
             return ClassificationResult(
                 verdict = SmsVerdict.SAFE,
                 score = 0,
@@ -47,9 +46,7 @@ class SpamClassifier(
             )
         }
 
-        val hasBankKeyword = SpamRules.BANK_TRANSACTION_KEYWORDS.any { normalizedBody.contains(it) }
-        val hasCurrency = SpamRules.CURRENCY_KEYWORDS.any { normalizedBody.contains(it) }
-        if (hasBankKeyword && hasCurrency) {
+        if (isSafeBankTransaction(normalizedBody)) {
             return ClassificationResult(
                 verdict = SmsVerdict.SAFE,
                 score = 0,
@@ -75,5 +72,32 @@ class SpamClassifier(
             score = breakdown.totalScore,
             reasons = breakdown.reasons
         )
+    }
+
+    private fun isSafeOtp(normalizedBody: String): Boolean {
+        val hasOtpKeyword = SpamRules.OTP_KEYWORDS.any { normalizedBody.contains(it) }
+        if (!hasOtpKeyword || !SpamRules.OTP_CODE_REGEX.containsMatchIn(normalizedBody)) {
+            return false
+        }
+
+        val hasStrongOtp = SpamRules.STRONG_OTP_KEYWORDS.any { normalizedBody.contains(it) }
+        val hasPromoGuard = SpamRules.OPT_OUT_REGEX.containsMatchIn(normalizedBody) ||
+            SpamRules.OTP_PROMO_GUARD_KEYWORDS.any { normalizedBody.contains(it) }
+
+        return hasStrongOtp || !hasPromoGuard
+    }
+
+    private fun isSafeBankTransaction(normalizedBody: String): Boolean {
+        val hasBankVerb = SpamRules.BANK_TRANSACTION_VERBS.any { normalizedBody.contains(it) }
+        if (!hasBankVerb) return false
+
+        val hasAmountWithCurrency = SpamRules.BANK_AMOUNT_CURRENCY_REGEX.containsMatchIn(normalizedBody)
+        val hasBalanceContext = SpamRules.BANK_BALANCE_CONTEXT_KEYWORDS.any { normalizedBody.contains(it) }
+        if (!hasAmountWithCurrency && !hasBalanceContext) return false
+
+        val hasBankPromoGuard = SpamRules.OPT_OUT_REGEX.containsMatchIn(normalizedBody) ||
+            SpamRules.BANK_PROMO_GUARD_KEYWORDS.any { normalizedBody.contains(it) }
+
+        return !hasBankPromoGuard
     }
 }
