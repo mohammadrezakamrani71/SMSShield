@@ -15,9 +15,11 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
@@ -30,22 +32,32 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.smsshield.app.data.database.BlockedSenderEntity
 import com.smsshield.app.data.database.CustomRuleEntity
 import com.smsshield.app.data.database.WhitelistEntity
+import com.smsshield.engine.model.SenderMatchType
 import kotlin.math.roundToInt
 
 @Composable
 fun SettingsScreen(
     spamThreshold: Int,
     whitelistedSenders: List<WhitelistEntity>,
+    blockedSenders: List<BlockedSenderEntity>,
     customRules: List<CustomRuleEntity>,
+    backupStatusMessage: String?,
     onThresholdChange: (Int) -> Unit,
     onAddWhitelist: (String) -> Unit,
     onRemoveWhitelist: (WhitelistEntity) -> Unit,
+    onAddBlockedSender: (String, SenderMatchType) -> Unit,
+    onRemoveBlockedSender: (BlockedSenderEntity) -> Unit,
     onAddCustomRule: (String, Int) -> Unit,
-    onRemoveCustomRule: (CustomRuleEntity) -> Unit
+    onRemoveCustomRule: (CustomRuleEntity) -> Unit,
+    onExportBackup: () -> Unit,
+    onImportBackup: () -> Unit
 ) {
     var newSender by remember { mutableStateOf("") }
+    var newBlockedPattern by remember { mutableStateOf("") }
+    var selectedMatchType by remember { mutableStateOf(SenderMatchType.EXACT) }
     var newKeyword by remember { mutableStateOf("") }
     var newWeightText by remember { mutableStateOf("25") }
 
@@ -74,6 +86,84 @@ fun SettingsScreen(
                     valueRange = 50f..100f,
                     steps = 9
                 )
+            }
+        }
+
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text(
+                    text = "بلاک سرشماره",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = selectedMatchType == SenderMatchType.EXACT,
+                        onClick = { selectedMatchType = SenderMatchType.EXACT },
+                        label = { Text("تطابق دقیق (550021)") }
+                    )
+                    FilterChip(
+                        selected = selectedMatchType == SenderMatchType.PREFIX,
+                        onClick = { selectedMatchType = SenderMatchType.PREFIX },
+                        label = { Text("پیشوند / شروع با (*)") }
+                    )
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    OutlinedTextField(
+                        value = newBlockedPattern,
+                        onValueChange = { newBlockedPattern = it },
+                        label = { Text("سرشماره یا پیشوند") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Button(
+                        onClick = {
+                            if (newBlockedPattern.isNotBlank()) {
+                                onAddBlockedSender(newBlockedPattern, selectedMatchType)
+                                newBlockedPattern = ""
+                            }
+                        }
+                    ) {
+                        Text("بلاک")
+                    }
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                if (blockedSenders.isEmpty()) {
+                    Text(
+                        text = "هنوز سرشماره‌ای مسدود نشده است.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                } else {
+                    blockedSenders.forEach { blocked ->
+                        val typeLabel = if (blocked.matchType == SenderMatchType.PREFIX.name) {
+                            "پیشوند"
+                        } else {
+                            "دقیق"
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "${blocked.displayPattern} ($typeLabel • ${blocked.hitCount} شکار)",
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            IconButton(onClick = { onRemoveBlockedSender(blocked) }) {
+                                Icon(
+                                    imageVector = Icons.Default.Delete,
+                                    contentDescription = "حذف"
+                                )
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -190,7 +280,7 @@ fun SettingsScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = "${rule.keyword} (وزن: ${rule.weight})",
+                                text = "${rule.keyword} (وزن: ${rule.weight} • ${rule.hitCount} شکار)",
                                 style = MaterialTheme.typography.bodyMedium
                             )
                             IconButton(onClick = { onRemoveCustomRule(rule) }) {
@@ -201,6 +291,47 @@ fun SettingsScreen(
                             }
                         }
                     }
+                }
+            }
+        }
+
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text(
+                    text = "پشتیبان‌گیری و بازیابی تنظیمات",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "تمام کلیدواژه‌ها، سرشماره‌های مسدودشده، لیست مجاز و حساسیت را به‌صورت فایل JSON روی گوشی ذخیره یا بازیابی کنید (بدون نیاز به اینترنت).",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Button(
+                        onClick = onExportBackup,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("خروجی پشتیبان")
+                    }
+                    OutlinedButton(
+                        onClick = onImportBackup,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("بازیابی پشتیبان")
+                    }
+                }
+                if (!backupStatusMessage.isNullOrBlank()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = backupStatusMessage,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
                 }
             }
         }
