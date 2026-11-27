@@ -228,7 +228,7 @@ class ShieldRepository(
                 .getOrDefault(SenderMatchType.EXACT)
             BlockedSenderItem(pattern = it.displayPattern, matchType = matchType)
         }
-        val whitelist = whitelistDao.getAll().map { it.displayName }
+        val whitelist = whitelistDao.getAll().map { it.normalizedSender }
 
         return FullBackupData(
             schemaVersion = 1,
