@@ -56,7 +56,7 @@ object NotificationParser {
                     sender = sender,
                     body = messageText,
                     timestamp = timestamp,
-                    isPossiblyTruncated = false
+                    isPossiblyTruncated = isPossiblyTruncated(messageText)
                 )
             }
         }
@@ -71,7 +71,7 @@ object NotificationParser {
                 sender = fallbackSender,
                 body = bigText,
                 timestamp = sbn.postTime,
-                isPossiblyTruncated = false
+                isPossiblyTruncated = isPossiblyTruncated(bigText)
             )
         }
 
@@ -80,16 +80,18 @@ object NotificationParser {
             ?.trim()
             .orEmpty()
         if (extraText.isNotEmpty()) {
-            val isTruncated = extraText.endsWith("…") || extraText.endsWith("...")
             return ParsedSmsNotification(
                 packageName = packageName,
                 sender = fallbackSender,
                 body = extraText,
                 timestamp = sbn.postTime,
-                isPossiblyTruncated = isTruncated
+                isPossiblyTruncated = isPossiblyTruncated(extraText)
             )
         }
 
         return null
     }
+
+    private fun isPossiblyTruncated(text: String): Boolean =
+        text.endsWith("…") || text.endsWith("...")
 }

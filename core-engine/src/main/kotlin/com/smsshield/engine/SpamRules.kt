@@ -17,6 +17,7 @@ object SpamRules {
 
     const val DEFAULT_SPAM_THRESHOLD = 75
     const val SUSPICIOUS_OFFSET = 25
+    const val MAX_TOTAL_SCORE = 100
     const val PROMO_SCORE_CAP = 55
     const val OPT_OUT_WEIGHT = 45
     const val BULK_SENDER_WEIGHT = 15

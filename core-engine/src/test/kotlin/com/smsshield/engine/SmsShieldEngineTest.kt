@@ -27,6 +27,11 @@ class SmsShieldEngineTest {
     }
 
     @Test
+    fun `normalizes Arabic presentation forms using Unicode compatibility normalization`() {
+        assertEquals("لا", PersianNormalizer.normalize("ﻻ"))
+    }
+
+    @Test
     fun `otp exception keeps verification SMS safe even with bulk sender and opt-out`() {
         val sms = SmsInput(
             sender = "30001234",
@@ -133,7 +138,7 @@ class SmsShieldEngineTest {
     }
 
     @Test
-    fun `custom user keywords contribute to score`() {
+    fun `custom user keywords contribute to score without exceeding the global score ceiling`() {
         val sms = SmsInput(
             sender = "50001122",
             body = "ثبت نام کلاس ارز دیجیتال با لینک b2n.ir/crypto لغو11"
@@ -145,7 +150,7 @@ class SmsShieldEngineTest {
             )
         )
 
-        assertEquals(110, result.score)
+        assertEquals(100, result.score)
         assertEquals(SmsVerdict.SPAM, result.verdict)
         assertTrue(result.reasons.any { it.contains("ارز دیجیتال") })
     }

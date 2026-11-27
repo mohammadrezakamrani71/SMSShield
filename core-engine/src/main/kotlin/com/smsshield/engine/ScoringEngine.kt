@@ -77,9 +77,13 @@ class ScoringEngine {
             reasons += "کلیدواژه خدماتی معتبر «$matchedServiceWord» (${SpamRules.SERVICE_NEGATIVE_WEIGHT})"
         }
 
-        val flooredScore = maxOf(0, score)
+        val boundedScore = score.coerceIn(0, SpamRules.MAX_TOTAL_SCORE)
+        if (boundedScore != score) {
+            reasons += "امتیاز نهایی به بازه ۰ تا ${SpamRules.MAX_TOTAL_SCORE} محدود شد"
+        }
+
         return ScoreBreakdown(
-            totalScore = flooredScore,
+            totalScore = boundedScore,
             reasons = reasons
         )
     }
