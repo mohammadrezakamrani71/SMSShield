@@ -2,6 +2,8 @@ package com.smsshield.app.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -40,7 +42,8 @@ private enum class QuarantineFilter(val label: String) {
 fun QuarantineScreen(
     messages: List<QuarantineEntity>,
     onMarkNotSpam: (Long) -> Unit,
-    onAddToWhitelist: (String) -> Unit
+    onAddToWhitelist: (String) -> Unit,
+    onBlockSender: (String) -> Unit
 ) {
     var selectedFilter by remember { mutableStateOf(QuarantineFilter.ALL) }
 
@@ -93,7 +96,8 @@ fun QuarantineScreen(
                     QuarantineCard(
                         item = item,
                         onMarkNotSpam = { onMarkNotSpam(item.id) },
-                        onAddToWhitelist = { onAddToWhitelist(item.sender) }
+                        onAddToWhitelist = { onAddToWhitelist(item.sender) },
+                        onBlockSender = { onBlockSender(item.sender) }
                     )
                 }
             }
@@ -101,11 +105,13 @@ fun QuarantineScreen(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun QuarantineCard(
     item: QuarantineEntity,
     onMarkNotSpam: () -> Unit,
-    onAddToWhitelist: () -> Unit
+    onAddToWhitelist: () -> Unit,
+    onBlockSender: () -> Unit
 ) {
     val reasons = remember(item.reasonsJson) { parseReasons(item.reasonsJson) }
 
@@ -168,7 +174,7 @@ private fun QuarantineCard(
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            Row(
+            FlowRow(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
@@ -180,6 +186,15 @@ private fun QuarantineCard(
                 }
                 TextButton(onClick = onAddToWhitelist) {
                     Text("افزودن به لیست مجاز")
+                }
+                TextButton(
+                    onClick = onBlockSender,
+                    enabled = item.sender.isNotBlank()
+                ) {
+                    Text(
+                        text = "بلاک سرشماره",
+                        color = MaterialTheme.colorScheme.error
+                    )
                 }
             }
         }
