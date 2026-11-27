@@ -3,7 +3,6 @@ name: Android CI & APK Build
 on:
   push:
     branches: [ "main" ]
-    tags: [ "v*" ]
   pull_request:
     branches: [ "main" ]
   workflow_dispatch:
@@ -36,6 +35,9 @@ jobs:
       - name: Run Core Engine Unit Tests
         run: gradle :core-engine:test
 
+      - name: Run App Unit Tests
+        run: gradle :app:testDebugUnitTest
+
       - name: Build Debug APK
         run: gradle :app:assembleDebug
 
@@ -46,7 +48,3 @@ jobs:
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
-
-# Release publishing is intentionally not automated yet. The current APK is a
-# debug build; production releases should be signed and published from a
-# dedicated tag-triggered workflow after release signing is configured.
