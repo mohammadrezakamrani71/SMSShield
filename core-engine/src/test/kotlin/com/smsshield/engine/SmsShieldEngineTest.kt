@@ -1,8 +1,11 @@
 package com.smsshield.engine
 
+import com.smsshield.engine.model.BlockedSenderRule
+import com.smsshield.engine.model.SenderMatchType
 import com.smsshield.engine.model.SmsInput
 import com.smsshield.engine.model.SmsVerdict
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -33,6 +36,17 @@ class SmsShieldEngineTest {
         val normalized = PersianNormalizer.normalize(raw)
 
         assertEquals("otp code: 123456 for b2n.ir", normalized)
+    }
+
+    @Test
+    fun `normalizes Iranian sender formats consistently`() {
+        val expected = "550021"
+        assertEquals(expected, PersianNormalizer.normalizeSender("550021"))
+        assertEquals(expected, PersianNormalizer.normalizeSender("98550021"))
+        assertEquals(expected, PersianNormalizer.normalizeSender("+98550021"))
+        assertEquals(expected, PersianNormalizer.normalizeSender("0098550021"))
+        assertEquals(expected, PersianNormalizer.normalizeSender("۵۵۰۰۲۱"))
+        assertEquals(expected, PersianNormalizer.normalizeSender("+98 (550)-021"))
     }
 
     @Test
@@ -173,7 +187,7 @@ class SmsShieldEngineTest {
     }
 
     @Test
-    fun `truncation safety guard always returns SAFE with score 0`() {
+    fun `truncation safety guard always returns SAFE with score 0 when sender is not blocked`() {
         val sms = SmsInput(
             sender = "50001234",
             body = "فروش ویژه جشنواره قرعه کشی b2n.ir/abc تماس 09121234567 لغو 11...",
@@ -186,22 +200,46 @@ class SmsShieldEngineTest {
     }
 
     @Test
-    fun `manual whitelist overrides spam signals`() {
+    fun `manual whitelist overrides spam signals and sender blacklist`() {
         val sms = SmsInput(
             sender = "+98 3000 5555",
             body = "فروش ویژه با کد تخفیف b2n.ir/test تماس 02188881234 لغو 11"
         )
         val result = classifier.classify(
             input = sms,
-            whitelistedSenders = setOf("+9830005555")
+            whitelistedSenders = setOf("+9830005555"),
+            blockedSenders = listOf(BlockedSenderRule("30005555", SenderMatchType.EXACT))
         )
 
         assertEquals(SmsVerdict.SAFE, result.verdict)
         assertEquals(0, result.score)
+        assertNull(result.matchedBlockedSenderPattern)
     }
 
     @Test
-    fun `custom user keywords contribute to score and respect global ceiling of 100`() {
+    fun `exact and prefix sender blocking triggers SPAM 100 even when body is truncated`() {
+        val exactRule = BlockedSenderRule("550021", SenderMatchType.EXACT)
+        val exactResult = classifier.classify(
+            input = SmsInput(sender = "+98550021", body = "سلام...", isPossiblyTruncated = true),
+            blockedSenders = listOf(exactRule)
+        )
+        assertEquals(SmsVerdict.SPAM, exactResult.verdict)
+        assertEquals(100, exactResult.score)
+        assertEquals("550021", exactResult.matchedBlockedSenderPattern)
+        assertTrue(exactResult.reasons.first().contains("550021"))
+
+        val prefixRule = BlockedSenderRule("550021*", SenderMatchType.PREFIX)
+        val prefixResult = classifier.classify(
+            input = SmsInput(sender = "0098550021999", body = "متن کوتاه…", isPossiblyTruncated = true),
+            blockedSenders = listOf(prefixRule)
+        )
+        assertEquals(SmsVerdict.SPAM, prefixResult.verdict)
+        assertEquals(100, prefixResult.score)
+        assertEquals("550021", prefixResult.matchedBlockedSenderPattern)
+    }
+
+    @Test
+    fun `custom user keywords contribute to score, attribute hits, and respect global ceiling of 100`() {
         val sms = SmsInput(
             sender = "50001122",
             body = "ثبت نام کلاس ارز دیجیتال با لینک b2n.ir/crypto لغو11"
@@ -215,6 +253,45 @@ class SmsShieldEngineTest {
 
         assertEquals(100, result.score)
         assertEquals(SmsVerdict.SPAM, result.verdict)
+        assertEquals(listOf("ارز دیجیتال"), result.matchedCustomKeywords)
         assertTrue(result.reasons.any { it.contains("ارز دیجیتال") })
+    }
+
+    @Test
+    fun `RulePackCodec round-trips JSON and share code, clamps weights, and rejects malformed payloads`() {
+        val original = RulePack(
+            packName = "پک تست تبلیغات",
+            authorName = "علی",
+            description = "پک نمونه",
+            category = "عمومی",
+            caughtCount = 42,
+            keywords = listOf(
+                KeywordRuleItem("کلینیک زیبایی", weight = 150),
+                KeywordRuleItem("وام فوری", weight = 1),
+                KeywordRuleItem("   ", weight = 25)
+            ),
+            blockedSenders = listOf(
+                BlockedSenderItem("550021*", SenderMatchType.PREFIX),
+                BlockedSenderItem("   ", SenderMatchType.EXACT)
+            )
+        )
+
+        val jsonStr = RulePackCodec.encodePackToJson(original)
+        val decodedJson = RulePackCodec.decodePackFromJson(jsonStr).getOrThrow()
+        assertEquals("پک تست تبلیغات", decodedJson.packName)
+        assertEquals(2, decodedJson.keywords.size)
+        assertEquals(100, decodedJson.keywords[0].weight)
+        assertEquals(5, decodedJson.keywords[1].weight)
+        assertEquals(1, decodedJson.blockedSenders.size)
+        assertEquals(SenderMatchType.PREFIX, decodedJson.blockedSenders[0].matchType)
+
+        val shareCode = RulePackCodec.encodePackToShareCode(original)
+        assertTrue(shareCode.startsWith(RulePackCodec.SHARE_CODE_PREFIX))
+        val decodedCode = RulePackCodec.decodePackFromShareCodeOrJson(shareCode).getOrThrow()
+        assertEquals(decodedJson, decodedCode)
+
+        assertTrue(RulePackCodec.decodePackFromShareCodeOrJson("not-valid-json").isFailure)
+        assertTrue(RulePackCodec.decodePackFromShareCodeOrJson("SMSSHIELD-PACK:v1:!!!bad!!!").isFailure)
+        assertTrue(RulePackCodec.decodePackFromJson("{}").isFailure)
     }
 }
