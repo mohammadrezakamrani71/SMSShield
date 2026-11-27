@@ -17,8 +17,8 @@ object SpamRules {
 
     const val DEFAULT_SPAM_THRESHOLD = 75
     const val SUSPICIOUS_OFFSET = 25
-    const val MAX_TOTAL_SCORE = 100
     const val PROMO_SCORE_CAP = 55
+    const val MAX_TOTAL_SCORE = 100
     const val OPT_OUT_WEIGHT = 45
     const val BULK_SENDER_WEIGHT = 15
     const val URL_WEIGHT = 20
@@ -32,22 +32,47 @@ object SpamRules {
         "رمز یکبار مصرف",
         "رمز یک بار مصرف",
         "otp",
-        "verification code"
+        "verification code",
+        "passcode"
+    )
+
+    val STRONG_OTP_KEYWORDS = listOf(
+        "رمز پویا",
+        "کد ورود"
+    )
+
+    val OTP_PROMO_GUARD_KEYWORDS = listOf(
+        "کد تخفیف",
+        "قرعه کشی",
+        "جشنواره",
+        "فروش ویژه"
     )
 
     val OTP_CODE_REGEX = Regex("\\b\\d{4,8}\\b")
 
-    val BANK_TRANSACTION_KEYWORDS = listOf(
+    val BANK_TRANSACTION_VERBS = listOf(
         "برداشت",
         "واریز",
-        "مانده",
-        "موجودی",
         "انتقال وجه",
-        "تراکنش",
-        "کارت به کارت"
+        "کارت به کارت",
+        "تراکنش"
     )
 
-    val CURRENCY_KEYWORDS = listOf("ریال", "تومان")
+    val BANK_AMOUNT_CURRENCY_REGEX = Regex("\\d[\\d,]*\\s*(ریال|تومان)")
+
+    val BANK_BALANCE_CONTEXT_KEYWORDS = listOf(
+        "مانده",
+        "موجودی",
+        "حساب",
+        "کارت"
+    )
+
+    val BANK_PROMO_GUARD_KEYWORDS = listOf(
+        "جشنواره",
+        "قرعه کشی",
+        "تخفیف",
+        "فروش ویژه"
+    )
 
     val OPT_OUT_REGEX = Regex("لغو\\s*[=:]?\\s*11")
 
