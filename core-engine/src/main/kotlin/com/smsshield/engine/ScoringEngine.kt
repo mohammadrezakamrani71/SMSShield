@@ -2,7 +2,8 @@ package com.smsshield.engine
 
 data class ScoreBreakdown(
     val totalScore: Int,
-    val reasons: List<String>
+    val reasons: List<String>,
+    val matchedCustomKeywords: List<String> = emptyList()
 )
 
 class ScoringEngine {
@@ -14,6 +15,7 @@ class ScoringEngine {
     ): ScoreBreakdown {
         var score = 0
         val reasons = mutableListOf<String>()
+        val matchedCustomKeywords = mutableListOf<String>()
 
         if (SpamRules.OPT_OUT_REGEX.containsMatchIn(normalizedBody)) {
             score += SpamRules.OPT_OUT_WEIGHT
@@ -64,6 +66,7 @@ class ScoringEngine {
             val normalizedKeyword = PersianNormalizer.normalize(customRule.keyword)
             if (normalizedKeyword.isNotEmpty() && normalizedBody.contains(normalizedKeyword)) {
                 score += customRule.weight
+                matchedCustomKeywords += customRule.keyword
                 val sign = if (customRule.weight >= 0) "+" else ""
                 reasons += "قانون سفارشی «${customRule.keyword}» ($sign${customRule.weight})"
             }
@@ -78,13 +81,14 @@ class ScoringEngine {
         }
 
         val boundedScore = score.coerceIn(0, SpamRules.MAX_TOTAL_SCORE)
-        if (boundedScore != score) {
-            reasons += "امتیاز نهایی به بازه ۰ تا ${SpamRules.MAX_TOTAL_SCORE} محدود شد"
+        if (score > SpamRules.MAX_TOTAL_SCORE) {
+            reasons += "سقف امتیاز کل اعمال شد (${SpamRules.MAX_TOTAL_SCORE})"
         }
 
         return ScoreBreakdown(
             totalScore = boundedScore,
-            reasons = reasons
+            reasons = reasons,
+            matchedCustomKeywords = matchedCustomKeywords
         )
     }
 }
