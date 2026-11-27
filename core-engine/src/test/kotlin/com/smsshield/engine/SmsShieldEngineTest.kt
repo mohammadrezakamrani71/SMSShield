@@ -12,7 +12,7 @@ class SmsShieldEngineTest {
 
     @Test
     fun `normalizes Arabic letters, Persian and Arabic digits, ZWNJ, diacritics, and spaces`() {
-        val raw = "  فروش\\u200Cويژه\\u064E كالا\\u200B با \\u0665\\u0660٪ تخفيف أينستاگرام؟   لغو=۱۱  "
+        val raw = "  فروش\u200Cويژه\u064E كالا\u200B با \u0665\u0660٪ تخفيف أينستاگرام؟   لغو=۱۱  "
         val normalized = PersianNormalizer.normalize(raw)
 
         assertEquals("فروش ویژه کالا با 50٪ تخفیف اینستاگرام؟ لغو=11", normalized)
@@ -20,7 +20,7 @@ class SmsShieldEngineTest {
 
     @Test
     fun `normalizes Latin uppercase and invisible directional marks`() {
-        val raw = "\\u200FOTP\\u200E Code: \\uFEFF۱۲۳۴۵۶  for  B2N.IR"
+        val raw = "\u200FOTP\u200E Code: \uFEFF۱۲۳۴۵۶  for  B2N.IR"
         val normalized = PersianNormalizer.normalize(raw)
 
         assertEquals("otp code: 123456 for b2n.ir", normalized)
@@ -35,7 +35,7 @@ class SmsShieldEngineTest {
     fun `otp exception keeps verification SMS safe even with bulk sender and opt-out`() {
         val sms = SmsInput(
             sender = "30001234",
-            body = "کد تایید شما: ۴۸۲۹۱۰\\nلغو 11"
+            body = "کد تایید شما: ۴۸۲۹۱۰\nلغو 11"
         )
         val result = classifier.classify(sms)
 
@@ -47,7 +47,7 @@ class SmsShieldEngineTest {
     fun `bank transaction exception keeps transaction SMS safe without auto-whitelisting sender`() {
         val bankTx = SmsInput(
             sender = "30009999",
-            body = "بانک نمونه\\nبرداشت ۵۰۰,۰۰۰ ریال از حساب\\nمانده: ۱۲,۰۰۰,۰۰۰ ریال\\nلغو 11"
+            body = "بانک نمونه\nبرداشت ۵۰۰,۰۰۰ ریال از حساب\nمانده: ۱۲,۰۰۰,۰۰۰ ریال\nلغو 11"
         )
         val txResult = classifier.classify(bankTx)
         assertEquals(SmsVerdict.SAFE, txResult.verdict)
@@ -66,7 +66,7 @@ class SmsShieldEngineTest {
     fun `opt-out 11 combined with legitimate service words stays SAFE`() {
         val sms = SmsInput(
             sender = "20001234",
-            body = "مشتری گرامی، سفارش شما آماده تحویل است. کد پیگیری: 987654\\nلغو 11"
+            body = "مشتری گرامی، سفارش شما آماده تحویل است. کد پیگیری: 987654\nلغو 11"
         )
         val result = classifier.classify(sms)
 
