@@ -3,12 +3,17 @@ name: Android CI & APK Build
 on:
   push:
     branches: [ "main" ]
+    tags: [ "v*" ]
   pull_request:
     branches: [ "main" ]
   workflow_dispatch:
-  
+
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: android-ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -33,31 +38,15 @@ jobs:
 
       - name: Build Debug APK
         run: gradle :app:assembleDebug
-        
-      - name: Prepare Release APK
-        run: cp app/build/outputs/apk/debug/app-debug.apk SMSShield-v0.1.0-alpha.apk
-        
+
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4
         with:
           name: SMSShield-Debug-APK
           path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
 
-      - name: Publish GitHub Pre-Release
-        if: github.event_name != 'pull_request'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v0.1.0-alpha
-          name: SMSShield v0.1.0-alpha
-          prerelease: true
-          files: SMSShield-v0.1.0-alpha.apk
-          body: |
-            ## SMSShield v0.1.0-alpha (Pre-release)
-            Offline, lightweight, zero-permission Iranian SMS spam notification filter for Android.
-            Install `SMSShield-v0.1.0-alpha.apk` (Android 8.0 / API 26+) and enable Notification Access from the Dashboard. Starts in Learning Mode by default.
-
-            ---
-
-            ## سپر پیامک نسخه v0.1.0-alpha (پیش‌انتشار)
-            فیلتر آفلاین، سبک و بدون دسترسی پیامک برای حذف اعلان‌های پیامک‌های تبلیغاتی ایرانی در اندروید.
-            فایل `SMSShield-v0.1.0-alpha.apk` را نصب کنید (اندروید ۸ و بالاتر) و از بخش داشبورد دسترسی اعلان‌ها را فعال نمایید. برنامه به‌صورت پیش‌فرض در حالت یادگیری اجرا می‌شود.
+# Release publishing is intentionally not automated yet. The current APK is a
+# debug build; production releases should be signed and published from a
+# dedicated tag-triggered workflow after release signing is configured.
