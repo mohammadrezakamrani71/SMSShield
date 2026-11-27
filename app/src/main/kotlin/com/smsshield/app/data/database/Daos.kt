@@ -16,6 +16,12 @@ interface QuarantineDao {
     @Query("SELECT EXISTS(SELECT 1 FROM quarantine_messages WHERE dedupKey = :dedupKey)")
     suspend fun existsByDedupKey(dedupKey: String): Boolean
 
+    @Query(
+        "SELECT EXISTS(SELECT 1 FROM quarantine_messages " +
+            "WHERE contentHash = :contentHash AND timestamp >= :minTimestamp)"
+    )
+    suspend fun existsRecentByContentHash(contentHash: String, minTimestamp: Long): Boolean
+
     @Query("SELECT * FROM quarantine_messages ORDER BY timestamp DESC")
     fun observeAll(): Flow<List<QuarantineEntity>>
 

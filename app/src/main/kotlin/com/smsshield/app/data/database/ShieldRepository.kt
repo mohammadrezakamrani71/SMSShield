@@ -1,5 +1,6 @@
 package com.smsshield.app.data.database
 
+import com.smsshield.app.notification.DeduplicationHelper
 import com.smsshield.engine.CustomKeywordRule
 import com.smsshield.engine.PersianNormalizer
 import kotlinx.coroutines.flow.Flow
@@ -26,6 +27,15 @@ class ShieldRepository(
 
     suspend fun existsByDedupKey(dedupKey: String): Boolean =
         quarantineDao.existsByDedupKey(dedupKey)
+
+    suspend fun isDuplicateWithinWindow(
+        contentHash: String,
+        timestamp: Long,
+        windowMillis: Long = DeduplicationHelper.SLIDING_WINDOW_MILLIS
+    ): Boolean = quarantineDao.existsRecentByContentHash(
+        contentHash = contentHash,
+        minTimestamp = timestamp - windowMillis
+    )
 
     suspend fun insertQuarantine(entity: QuarantineEntity): Long =
         quarantineDao.insert(entity)

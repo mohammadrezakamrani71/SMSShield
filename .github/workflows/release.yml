@@ -1,0 +1,114 @@
+name: Release APK
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Run Core Engine Unit Tests
+        run: gradle :core-engine:test
+
+      - name: Run App Unit Tests
+        run: gradle :app:testDebugUnitTest
+
+      - name: Determine Release Mode
+        id: mode
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          IS_PRERELEASE="false"
+          if [[ "$TAG" == *"-alpha"* || "$TAG" == *"-beta"* ]]; then
+            IS_PRERELEASE="true"
+          fi
+
+          HAS_SECRETS="false"
+          if [[ -n "$KEYSTORE_BASE64" && -n "$KEYSTORE_PASSWORD" && -n "$KEY_ALIAS" && -n "$KEY_PASSWORD" ]]; then
+            HAS_SECRETS="true"
+          fi
+
+          if [[ "$HAS_SECRETS" == "false" && "$IS_PRERELEASE" == "false" ]]; then
+            echo "::error::Stable tag '$TAG' requires KEYSTORE_BASE64, KEYSTORE_PASSWORD, KEY_ALIAS, and KEY_PASSWORD secrets."
+            exit 1
+          fi
+
+          echo "is_prerelease=$IS_PRERELEASE" >> "$GITHUB_OUTPUT"
+          echo "has_secrets=$HAS_SECRETS" >> "$GITHUB_OUTPUT"
+
+      - name: Decode Signing Keystore
+        if: steps.mode.outputs.has_secrets == 'true'
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 --decode > "${RUNNER_TEMP}/release.jks"
+
+      - name: Build Signed Release APK
+        if: steps.mode.outputs.has_secrets == 'true'
+        env:
+          KEYSTORE_PATH: ${{ runner.temp }}/release.jks
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          gradle :app:assembleRelease
+          cp app/build/outputs/apk/release/app-release.apk "SMSShield-${GITHUB_REF_NAME}.apk"
+
+      - name: Build Pre-Release Debug APK
+        if: steps.mode.outputs.has_secrets == 'false'
+        run: |
+          gradle :app:assembleDebug
+          cp app/build/outputs/apk/debug/app-debug.apk "SMSShield-${GITHUB_REF_NAME}-debug.apk"
+
+      - name: Publish Signed Release
+        if: steps.mode.outputs.has_secrets == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: SMSShield ${{ github.ref_name }}
+          prerelease: ${{ steps.mode.outputs.is_prerelease == 'true' }}
+          files: SMSShield-${{ github.ref_name }}.apk
+          body: |
+            ## SMSShield ${{ github.ref_name }}
+            Signed release build of SMSShield — offline, zero-permission Iranian SMS spam notification filter for Android.
+
+            ## سپر پیامک نسخه ${{ github.ref_name }}
+            نسخه امضاشده سپر پیامک — فیلتر آفلاین و بدون دسترسی پیامک برای حذف اعلان‌های پیامک‌های تبلیغاتی ایرانی در اندروید.
+
+      - name: Publish Debug Pre-Release
+        if: steps.mode.outputs.has_secrets == 'false'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: SMSShield ${{ github.ref_name }} (Debug Pre-release)
+          prerelease: true
+          files: SMSShield-${{ github.ref_name }}-debug.apk
+          body: |
+            ## SMSShield ${{ github.ref_name }} (Debug Test Build)
+            **Note:** This is an unsigned debug test build published because release signing secrets are not yet configured.
+
+            ## سپر پیامک نسخه ${{ github.ref_name }} (نسخه آزمایشی Debug)
+            **توجه:** این فایل یک نسخه آزمایشی (Debug) است و با کلید انتشار رسمی امضا نشده است.

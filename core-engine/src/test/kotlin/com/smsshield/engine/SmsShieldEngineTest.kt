@@ -19,6 +19,15 @@ class SmsShieldEngineTest {
     }
 
     @Test
+    fun `normalizes Arabic presentation forms using Unicode compatibility normalization`() {
+        val raw = "\uFEFB \uFEF7 \uFB8E\uFB90"
+        val normalized = PersianNormalizer.normalize(raw)
+
+        assertTrue(normalized.contains("لا"))
+        assertTrue(normalized.contains("ک"))
+    }
+
+    @Test
     fun `normalizes Latin uppercase and invisible directional marks`() {
         val raw = "\u200FOTP\u200E Code: \uFEFF۱۲۳۴۵۶  for  B2N.IR"
         val normalized = PersianNormalizer.normalize(raw)
@@ -27,15 +36,10 @@ class SmsShieldEngineTest {
     }
 
     @Test
-    fun `normalizes Arabic presentation forms using Unicode compatibility normalization`() {
-        assertEquals("لا", PersianNormalizer.normalize("ﻻ"))
-    }
-
-    @Test
-    fun `otp exception keeps verification SMS safe even with bulk sender and opt-out`() {
+    fun `genuine otp verification SMS stays safe`() {
         val sms = SmsInput(
             sender = "30001234",
-            body = "کد تایید شما: ۴۸۲۹۱۰\nلغو 11"
+            body = "کد تایید شما: ۴۸۲۹۱۰"
         )
         val result = classifier.classify(sms)
 
@@ -44,10 +48,46 @@ class SmsShieldEngineTest {
     }
 
     @Test
+    fun `strong otp phrase stays safe even if gateway appends opt-out 11`() {
+        val sms = SmsInput(
+            sender = "30001234",
+            body = "رمز پویا جهت خرید اینترنتی: ۴۸۲۹۱۰\nلغو 11"
+        )
+        val result = classifier.classify(sms)
+
+        assertEquals(SmsVerdict.SAFE, result.verdict)
+        assertEquals(0, result.score)
+    }
+
+    @Test
+    fun `passcode otp phrase with standalone digits stays safe`() {
+        val sms = SmsInput(
+            sender = "Verify",
+            body = "Your login passcode is 938412"
+        )
+        val result = classifier.classify(sms)
+
+        assertEquals(SmsVerdict.SAFE, result.verdict)
+        assertEquals(0, result.score)
+    }
+
+    @Test
+    fun `promotional SMS with verification-like wording and opt-out is NOT bypassed as OTP`() {
+        val sms = SmsInput(
+            sender = "50001234",
+            body = "کد تایید شرکت در جشنواره فروش ویژه: 123456 با کد تخفیف! b2n.ir/win لغو 11"
+        )
+        val result = classifier.classify(sms)
+
+        assertEquals(SmsVerdict.SPAM, result.verdict)
+        assertTrue(result.score >= 75)
+    }
+
+    @Test
     fun `bank transaction exception keeps transaction SMS safe without auto-whitelisting sender`() {
         val bankTx = SmsInput(
             sender = "30009999",
-            body = "بانک نمونه\nبرداشت ۵۰۰,۰۰۰ ریال از حساب\nمانده: ۱۲,۰۰۰,۰۰۰ ریال\nلغو 11"
+            body = "بانک نمونه\nبرداشت ۵۰۰,۰۰۰ ریال از حساب\nمانده: ۱۲,۰۰۰,۰۰۰ ریال"
         )
         val txResult = classifier.classify(bankTx)
         assertEquals(SmsVerdict.SAFE, txResult.verdict)
@@ -60,6 +100,29 @@ class SmsShieldEngineTest {
         )
         val promoResult = classifier.classify(bankPromo)
         assertEquals(SmsVerdict.SPAM, promoResult.verdict)
+    }
+
+    @Test
+    fun `festival ad mentioning toman and account is NOT bypassed as bank transaction`() {
+        val sms = SmsInput(
+            sender = "30008888",
+            body = "جشنواره بزرگ! با افتتاح حساب ۵۰۰,۰۰۰ تومان جایزه و واریز هدیه بگیرید b2n.ir/gift لغو 11"
+        )
+        val result = classifier.classify(sms)
+
+        assertEquals(SmsVerdict.SPAM, result.verdict)
+        assertTrue(result.score >= 75)
+    }
+
+    @Test
+    fun `bank campaign SMS with deposit verb and opt-out 11 is NOT bypassed`() {
+        val sms = SmsInput(
+            sender = "30007777",
+            body = "واریز 100000 تومان اعتبار هدیه خرید آنلاین در فروش ویژه b2n.ir/bank لغو 11"
+        )
+        val result = classifier.classify(sms)
+
+        assertEquals(SmsVerdict.SPAM, result.verdict)
     }
 
     @Test
@@ -138,7 +201,7 @@ class SmsShieldEngineTest {
     }
 
     @Test
-    fun `custom user keywords contribute to score without exceeding the global score ceiling`() {
+    fun `custom user keywords contribute to score and respect global ceiling of 100`() {
         val sms = SmsInput(
             sender = "50001122",
             body = "ثبت نام کلاس ارز دیجیتال با لینک b2n.ir/crypto لغو11"
