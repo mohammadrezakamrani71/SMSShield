@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Strict zero-permission policy: NO INTERNET, READ_SMS, RECEIVE_SMS, or READ_CONTACTS -->
+
+    <application
+        android:name=".SmsShieldApplication"
+        android:allowBackup="true"
+        android:icon="@drawable/ic_shield_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@drawable/ic_shield_launcher"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.SMSShield">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <service
+            android:name=".notification.SmsNotificationListener"
+            android:exported="true"
+            android:label="@string/listener_service_label"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
+    </application>
+
+</manifest>
