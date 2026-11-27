@@ -1,18 +1,22 @@
 package com.smsshield.engine
 
+import java.text.Normalizer
 import java.util.Locale
 
 object PersianNormalizer {
 
     private val INVISIBLE_AND_DIACRITICS_REGEX =
-        Regex("[\\u200B\\u200E\\u200F\\uFEFF\\u064B-\\u0652]")
+        Regex("[\\u200B\\u200E\\u200F\\uFEFF\\u0610-\\u061A\\u064B-\\u065F\\u0670\\u06D6-\\u06ED]")
 
     private val MULTI_SPACE_REGEX = Regex("\\s+")
 
     fun normalize(input: String): String {
         if (input.isEmpty()) return ""
 
-        val cleaned = INVISIBLE_AND_DIACRITICS_REGEX.replace(input, "")
+        // NFKC folds Arabic presentation forms and other compatibility variants
+        // before the explicit Persian/Arabic character mapping below.
+        val compatibilityNormalized = Normalizer.normalize(input, Normalizer.Form.NFKC)
+        val cleaned = INVISIBLE_AND_DIACRITICS_REGEX.replace(compatibilityNormalized, "")
         val sb = StringBuilder(cleaned.length)
 
         for (ch in cleaned) {
