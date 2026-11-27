@@ -2,15 +2,23 @@ package com.smsshield.app.notification
 
 import com.smsshield.engine.PersianNormalizer
 import java.security.MessageDigest
+import kotlin.math.abs
 
 object DeduplicationHelper {
 
-    /**
-     * Uses the message timestamp exactly rather than a coarse time bucket.
-     * This avoids treating two distinct messages near a five-minute boundary
-     * as duplicates. The parser should prefer MessagingStyle's message timestamp
-     * and use notification post time only as a fallback.
-     */
+    const val SLIDING_WINDOW_MILLIS = 60_000L
+
+    fun buildContentHash(
+        packageName: String,
+        sender: String,
+        body: String
+    ): String {
+        val normalizedSender = PersianNormalizer.normalizeSender(sender)
+        val normalizedBody = PersianNormalizer.normalize(body)
+        val raw = "$packageName|$normalizedSender|$normalizedBody"
+        return sha256Hex(raw)
+    }
+
     fun buildDedupKey(
         packageName: String,
         sender: String,
@@ -21,6 +29,14 @@ object DeduplicationHelper {
         val normalizedBody = PersianNormalizer.normalize(body)
         val raw = "$packageName|$normalizedSender|$normalizedBody|$timestamp"
         return sha256Hex(raw)
+    }
+
+    fun isWithinSlidingWindow(
+        existingTimestamp: Long,
+        newTimestamp: Long,
+        windowMillis: Long = SLIDING_WINDOW_MILLIS
+    ): Boolean {
+        return abs(newTimestamp - existingTimestamp) <= windowMillis
     }
 
     private fun sha256Hex(input: String): String {
