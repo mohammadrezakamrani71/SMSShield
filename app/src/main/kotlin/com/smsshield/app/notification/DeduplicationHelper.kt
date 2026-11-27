@@ -5,8 +5,12 @@ import java.security.MessageDigest
 
 object DeduplicationHelper {
 
-    private const val WINDOW_MILLIS = 300_000L
-
+    /**
+     * Uses the message timestamp exactly rather than a coarse time bucket.
+     * This avoids treating two distinct messages near a five-minute boundary
+     * as duplicates. The parser should prefer MessagingStyle's message timestamp
+     * and use notification post time only as a fallback.
+     */
     fun buildDedupKey(
         packageName: String,
         sender: String,
@@ -15,8 +19,7 @@ object DeduplicationHelper {
     ): String {
         val normalizedSender = PersianNormalizer.normalizeSender(sender)
         val normalizedBody = PersianNormalizer.normalize(body)
-        val timeBucket = timestamp / WINDOW_MILLIS
-        val raw = "$packageName|$normalizedSender|$normalizedBody|$timeBucket"
+        val raw = "$packageName|$normalizedSender|$normalizedBody|$timestamp"
         return sha256Hex(raw)
     }
 
