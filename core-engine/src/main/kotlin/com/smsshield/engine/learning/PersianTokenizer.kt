@@ -11,6 +11,26 @@ object PersianTokenizer {
     const val BEHAVIOR_BULK_SENDER = "__BULK_SENDER__"
     const val BEHAVIOR_PROMO_LONG_MSG = "__PROMO_LONG_MSG__"
 
+    const val BEHAVIOR_SENDER_GATEWAY_1000 = "__SENDER_GATEWAY_1000__"
+    const val BEHAVIOR_SENDER_GATEWAY_2000 = "__SENDER_GATEWAY_2000__"
+    const val BEHAVIOR_SENDER_GATEWAY_3000 = "__SENDER_GATEWAY_3000__"
+    const val BEHAVIOR_SENDER_GATEWAY_5000 = "__SENDER_GATEWAY_5000__"
+    const val BEHAVIOR_SENDER_GATEWAY_9000 = "__SENDER_GATEWAY_9000__"
+    const val BEHAVIOR_SENDER_SHORTCODE = "__SENDER_SHORTCODE__"
+    const val BEHAVIOR_SENDER_MOBILE = "__SENDER_MOBILE__"
+    const val BEHAVIOR_SENDER_ALPHANUMERIC = "__SENDER_ALPHANUMERIC__"
+
+    val SENDER_BEHAVIOR_KEYS = listOf(
+        BEHAVIOR_SENDER_GATEWAY_1000,
+        BEHAVIOR_SENDER_GATEWAY_2000,
+        BEHAVIOR_SENDER_GATEWAY_3000,
+        BEHAVIOR_SENDER_GATEWAY_5000,
+        BEHAVIOR_SENDER_GATEWAY_9000,
+        BEHAVIOR_SENDER_SHORTCODE,
+        BEHAVIOR_SENDER_MOBILE,
+        BEHAVIOR_SENDER_ALPHANUMERIC
+    )
+
     val STOP_WORDS: Set<String> = setOf(
         "از", "به", "در", "با", "برای", "این", "آن", "است", "هست", "بود",
         "شد", "شود", "می", "را", "که", "تا", "یا", "هم", "اگر", "اما",
@@ -36,6 +56,34 @@ object PersianTokenizer {
                     token !in URL_NOISE_TOKENS
             }
             .toList()
+    }
+
+    /**
+     * Classifies a sender string into a coarse behavioral sender-pattern feature key.
+     */
+    fun classifySenderPattern(sender: String): String? {
+        val normalized = PersianNormalizer.normalizeSender(sender)
+        if (normalized.isEmpty()) return null
+
+        if (normalized.any { it.isLetter() }) {
+            return BEHAVIOR_SENDER_ALPHANUMERIC
+        }
+
+        if (!normalized.all { it.isDigit() }) {
+            return null
+        }
+
+        return when {
+            normalized.startsWith("1000") -> BEHAVIOR_SENDER_GATEWAY_1000
+            normalized.startsWith("2000") -> BEHAVIOR_SENDER_GATEWAY_2000
+            normalized.startsWith("3000") -> BEHAVIOR_SENDER_GATEWAY_3000
+            normalized.startsWith("5000") -> BEHAVIOR_SENDER_GATEWAY_5000
+            normalized.startsWith("9000") -> BEHAVIOR_SENDER_GATEWAY_9000
+            (normalized.length == 11 && normalized.startsWith("09")) ||
+                (normalized.length == 10 && normalized.startsWith("9")) -> BEHAVIOR_SENDER_MOBILE
+            normalized.length in 4..6 -> BEHAVIOR_SENDER_SHORTCODE
+            else -> null
+        }
     }
 
     /**
@@ -71,6 +119,11 @@ object PersianTokenizer {
         }
         if (normalizedBody.length >= 140) {
             features[BEHAVIOR_PROMO_LONG_MSG] = FeatureType.BEHAVIOR
+        }
+
+        val senderPattern = classifySenderPattern(sender)
+        if (senderPattern != null) {
+            features[senderPattern] = FeatureType.BEHAVIOR
         }
 
         return features

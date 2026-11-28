@@ -6,6 +6,7 @@ import com.smsshield.engine.model.ClassificationResult
 import com.smsshield.engine.model.SenderMatchType
 import com.smsshield.engine.model.SmsInput
 import com.smsshield.engine.model.SmsVerdict
+import com.smsshield.engine.model.SpamCategory
 
 class SpamClassifier(
     private val scoringEngine: ScoringEngine = ScoringEngine()
@@ -32,7 +33,9 @@ class SpamClassifier(
             return ClassificationResult(
                 verdict = SmsVerdict.SAFE,
                 score = 0,
-                reasons = listOf("استثنای ایمن: فرستنده در لیست مجاز کاربر است")
+                reasons = listOf("استثنای ایمن: فرستنده در لیست مجاز کاربر است"),
+                category = SpamCategory.NONE,
+                extractedDiscountCode = null
             )
         }
 
@@ -52,7 +55,9 @@ class SpamClassifier(
                         verdict = SmsVerdict.SPAM,
                         score = SpamRules.MAX_TOTAL_SCORE,
                         reasons = listOf("سرشماره مسدودشده توسط کاربر (${rule.pattern})"),
-                        matchedBlockedSenderPattern = normalizedPattern
+                        matchedBlockedSenderPattern = normalizedPattern,
+                        category = SpamCategory.SPAM_NUISANCE,
+                        extractedDiscountCode = null
                     )
                 }
             }
@@ -63,7 +68,9 @@ class SpamClassifier(
             return ClassificationResult(
                 verdict = SmsVerdict.SAFE,
                 score = 0,
-                reasons = listOf("استثنای ایمن: متن پیام احتمالاً ناقص است")
+                reasons = listOf("استثنای ایمن: متن پیام احتمالاً ناقص است"),
+                category = SpamCategory.NONE,
+                extractedDiscountCode = null
             )
         }
 
@@ -72,7 +79,9 @@ class SpamClassifier(
             return ClassificationResult(
                 verdict = SmsVerdict.SAFE,
                 score = 0,
-                reasons = listOf("استثنای ایمن: پیامک رمز پویا یا کد تایید")
+                reasons = listOf("استثنای ایمن: پیامک رمز پویا یا کد تایید"),
+                category = SpamCategory.NONE,
+                extractedDiscountCode = null
             )
         }
 
@@ -81,7 +90,9 @@ class SpamClassifier(
             return ClassificationResult(
                 verdict = SmsVerdict.SAFE,
                 score = 0,
-                reasons = listOf("استثنای ایمن: پیامک تراکنش بانکی")
+                reasons = listOf("استثنای ایمن: پیامک تراکنش بانکی"),
+                category = SpamCategory.NONE,
+                extractedDiscountCode = null
             )
         }
 
@@ -100,11 +111,31 @@ class SpamClassifier(
             else -> SmsVerdict.SAFE
         }
 
+        val category = if (verdict == SmsVerdict.SAFE) {
+            SpamCategory.NONE
+        } else {
+            val hasOfferSignal = breakdown.matchedOfferRule ||
+                SpamRules.PERCENT_DISCOUNT_REGEX.containsMatchIn(normalizedBody)
+            if (hasOfferSignal && !breakdown.matchedNuisanceRule) {
+                SpamCategory.OFFER
+            } else {
+                SpamCategory.SPAM_NUISANCE
+            }
+        }
+
+        val discountCode = if (category == SpamCategory.OFFER) {
+            DiscountCodeExtractor.extract(input.body)
+        } else {
+            null
+        }
+
         return ClassificationResult(
             verdict = verdict,
             score = breakdown.totalScore,
             reasons = breakdown.reasons,
-            matchedCustomKeywords = breakdown.matchedCustomKeywords
+            matchedCustomKeywords = breakdown.matchedCustomKeywords,
+            category = category,
+            extractedDiscountCode = discountCode
         )
     }
 

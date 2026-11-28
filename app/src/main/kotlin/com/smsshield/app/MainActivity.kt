@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.os.PowerManager
 import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -58,9 +59,11 @@ import com.smsshield.app.ui.QuarantineScreen
 import com.smsshield.app.ui.SettingsScreen
 import com.smsshield.app.ui.ShieldViewModel
 import com.smsshield.app.ui.SmartLearningScreen
+import com.smsshield.app.ui.TapToTeachDialog
 import com.smsshield.app.ui.theme.SMSShieldTheme
 import com.smsshield.engine.RulePack
 import com.smsshield.engine.RulePackCodec
+import com.smsshield.engine.learning.InspectedToken
 import com.smsshield.engine.model.SenderMatchType
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -96,6 +99,20 @@ class MainActivity : ComponentActivity() {
                         onConsumePendingShared = { incomingSharedTexts.value = emptyList() },
                         onOpenNotificationSettings = {
                             startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+                        },
+                        onOpenBatteryOptimizationSettings = {
+                            runCatching {
+                                startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+                            }.onFailure {
+                                runCatching {
+                                    startActivity(
+                                        Intent(
+                                            Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                            Uri.fromParts("package", packageName, null)
+                                        )
+                                    )
+                                }
+                            }
                         },
                         onOpenCommunityDiscussions = {
                             runCatching {
@@ -139,6 +156,13 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+private fun checkIgnoringBatteryOptimizations(context: Context): Boolean {
+    return runCatching {
+        val pm = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
+        pm?.isIgnoringBatteryOptimizations(context.packageName) == true
+    }.getOrDefault(false)
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SmsShieldRoot(
@@ -147,6 +171,7 @@ private fun SmsShieldRoot(
     pendingSharedTexts: List<String>,
     onConsumePendingShared: () -> Unit,
     onOpenNotificationSettings: () -> Unit,
+    onOpenBatteryOptimizationSettings: () -> Unit,
     onOpenCommunityDiscussions: () -> Unit
 ) {
     val context = LocalContext.current
@@ -160,12 +185,16 @@ private fun SmsShieldRoot(
                 .contains(context.packageName)
         )
     }
+    var isIgnoringBattery by remember {
+        mutableStateOf(checkIgnoringBatteryOptimizations(context))
+    }
 
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 hasAccess = NotificationManagerCompat.getEnabledListenerPackages(context)
                     .contains(context.packageName)
+                isIgnoringBattery = checkIgnoringBatteryOptimizations(context)
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -173,12 +202,32 @@ private fun SmsShieldRoot(
     }
 
     var selectedTab by remember { mutableIntStateOf(0) }
+    var simulatorOpenTrigger by remember { mutableIntStateOf(0) }
     var backupStatusMessage by remember { mutableStateOf<String?>(null) }
     var packStatusMessage by remember { mutableStateOf<String?>(null) }
     var learningStatusMessage by remember { mutableStateOf<String?>(null) }
     var pendingPreviewPack by remember { mutableStateOf<RulePack?>(null) }
     var pendingPackJsonToSave by remember { mutableStateOf<String?>(null) }
     var prefilledStudioKeywords by remember { mutableStateOf<List<String>>(emptyList()) }
+
+    // Reusable Tap-to-Teach Dialog state
+    var tapToTeachBody by remember { mutableStateOf<String?>(null) }
+    var tapToTeachTokens by remember { mutableStateOf<List<InspectedToken>>(emptyList()) }
+
+    val openTapToTeach: (String) -> Unit = { body ->
+        scope.launch {
+            tapToTeachTokens = viewModel.inspectMessageTokens(body)
+            tapToTeachBody = body
+        }
+    }
+
+    val copyDiscountCode: (String) -> Unit = { code ->
+        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(ClipData.newPlainText("SMSShield Discount Code", code))
+        scope.launch {
+            snackbarHostState.showSnackbar("کد تخفیف $code کپی شد.")
+        }
+    }
 
     LaunchedEffect(pendingSharedTexts) {
         if (pendingSharedTexts.isNotEmpty()) {
@@ -279,6 +328,7 @@ private fun SmsShieldRoot(
 
     val isActiveMode by viewModel.isActiveMode.collectAsStateWithLifecycle()
     val spamThreshold by viewModel.spamThreshold.collectAsStateWithLifecycle()
+    val diagnostics by viewModel.diagnostics.collectAsStateWithLifecycle()
     val blockedToday by viewModel.blockedTodayCount.collectAsStateWithLifecycle()
     val totalBlocked by viewModel.totalBlockedCount.collectAsStateWithLifecycle()
     val suspiciousLogged by viewModel.suspiciousCount.collectAsStateWithLifecycle()
@@ -361,7 +411,11 @@ private fun SmsShieldRoot(
                     totalBlocked = totalBlocked,
                     suspiciousLogged = suspiciousLogged,
                     onOpenNotificationSettings = onOpenNotificationSettings,
-                    onToggleActiveMode = viewModel::setActiveMode
+                    onToggleActiveMode = viewModel::setActiveMode,
+                    onOpenSimulator = {
+                        simulatorOpenTrigger++
+                        selectedTab = 2
+                    }
                 )
                 1 -> QuarantineScreen(
                     messages = quarantineMessages,
@@ -381,7 +435,10 @@ private fun SmsShieldRoot(
                         }
                     },
                     onDeleteMessage = viewModel::deleteQuarantineMessage,
-                    onClearAll = viewModel::clearAllQuarantine
+                    onClearAll = viewModel::clearAllQuarantine,
+                    isLikelyMixedSender = viewModel::isLikelyMixedSender,
+                    onOpenTapToTeach = openTapToTeach,
+                    onCopyDiscountCode = copyDiscountCode
                 )
                 2 -> SmartLearningScreen(
                     samples = trainingSamples,
@@ -389,6 +446,8 @@ private fun SmsShieldRoot(
                     report = learningReport,
                     pendingSharedTexts = pendingSharedTexts,
                     learningStatusMessage = learningStatusMessage,
+                    spamThreshold = spamThreshold,
+                    simulatorOpenTrigger = simulatorOpenTrigger,
                     onConsumePendingShared = onConsumePendingShared,
                     onAddSamples = { bodies, sender, label, source ->
                         scope.launch {
@@ -410,7 +469,11 @@ private fun SmsShieldRoot(
                     onBuildPackFromLearned = { keywords ->
                         prefilledStudioKeywords = keywords
                         selectedTab = 3
-                    }
+                    },
+                    onSimulateSms = viewModel::simulateClassification,
+                    onInspectTokens = viewModel::inspectMessageTokens,
+                    onOpenTapToTeach = openTapToTeach,
+                    onCopyDiscountCode = copyDiscountCode
                 )
                 3 -> PacksScreen(
                     totalUserHits = totalUserHits,
@@ -452,6 +515,11 @@ private fun SmsShieldRoot(
                     blockedSenders = blockedSenders,
                     customRules = customRules,
                     backupStatusMessage = backupStatusMessage,
+                    hasNotificationAccess = hasAccess,
+                    isIgnoringBatteryOptimizations = isIgnoringBattery,
+                    diagnostics = diagnostics,
+                    onOpenNotificationSettings = onOpenNotificationSettings,
+                    onOpenBatteryOptimizationSettings = onOpenBatteryOptimizationSettings,
                     onThresholdChange = viewModel::setSpamThreshold,
                     onThemeModeChange = viewModel::setThemeMode,
                     onAddWhitelist = { viewModel.whitelistSender(it) },
@@ -469,5 +537,21 @@ private fun SmsShieldRoot(
                 )
             }
         }
+    }
+
+    val activeTapToTeachBody = tapToTeachBody
+    if (activeTapToTeachBody != null) {
+        TapToTeachDialog(
+            messageBody = activeTapToTeachBody,
+            inspectedTokens = tapToTeachTokens,
+            onConfirmAddKeywords = { keywords, weight ->
+                viewModel.addCustomRulesBatch(keywords, weight)
+                tapToTeachBody = null
+                scope.launch {
+                    snackbarHostState.showSnackbar("${keywords.size} کلیدواژه به قوانین سفارشی اضافه شد.")
+                }
+            },
+            onDismiss = { tapToTeachBody = null }
+        )
     }
 }

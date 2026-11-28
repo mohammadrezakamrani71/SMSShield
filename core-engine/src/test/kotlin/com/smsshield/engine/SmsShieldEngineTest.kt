@@ -4,6 +4,7 @@ import com.smsshield.engine.model.BlockedSenderRule
 import com.smsshield.engine.model.SenderMatchType
 import com.smsshield.engine.model.SmsInput
 import com.smsshield.engine.model.SmsVerdict
+import com.smsshield.engine.model.SpamCategory
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -59,6 +60,8 @@ class SmsShieldEngineTest {
 
         assertEquals(SmsVerdict.SAFE, result.verdict)
         assertEquals(0, result.score)
+        assertEquals(SpamCategory.NONE, result.category)
+        assertNull(result.extractedDiscountCode)
     }
 
     @Test
@@ -71,6 +74,8 @@ class SmsShieldEngineTest {
 
         assertEquals(SmsVerdict.SAFE, result.verdict)
         assertEquals(0, result.score)
+        assertEquals(SpamCategory.NONE, result.category)
+        assertNull(result.extractedDiscountCode)
     }
 
     @Test
@@ -83,6 +88,8 @@ class SmsShieldEngineTest {
 
         assertEquals(SmsVerdict.SAFE, result.verdict)
         assertEquals(0, result.score)
+        assertEquals(SpamCategory.NONE, result.category)
+        assertNull(result.extractedDiscountCode)
     }
 
     @Test
@@ -106,6 +113,8 @@ class SmsShieldEngineTest {
         val txResult = classifier.classify(bankTx)
         assertEquals(SmsVerdict.SAFE, txResult.verdict)
         assertEquals(0, txResult.score)
+        assertEquals(SpamCategory.NONE, txResult.category)
+        assertNull(txResult.extractedDiscountCode)
 
         val promoLink = "https:" + "//shop.example.ir/win"
         val bankPromo = SmsInput(
@@ -255,6 +264,39 @@ class SmsShieldEngineTest {
         assertEquals(SmsVerdict.SPAM, result.verdict)
         assertEquals(listOf("ارز دیجیتال"), result.matchedCustomKeywords)
         assertTrue(result.reasons.any { it.contains("ارز دیجیتال") })
+    }
+
+    @Test
+    fun `black friday discount SMS is categorized as OFFER and extracts promo code`() {
+        val sms = SmsInput(
+            sender = "30001234",
+            body = "تخفیف بلک فرایدی تا ۴۰٪! کد تخفیف: BF40 خرید از b2n.ir/bf لغو 11"
+        )
+        val result = classifier.classify(sms)
+
+        assertEquals(SmsVerdict.SPAM, result.verdict)
+        assertEquals(SpamCategory.OFFER, result.category)
+        assertEquals("BF40", result.extractedDiscountCode)
+    }
+
+    @Test
+    fun `high-risk nuisance spam is categorized as SPAM_NUISANCE with no discount code`() {
+        val sms = SmsInput(
+            sender = "50004000",
+            body = "وام فوری و تسهیلات بدون ضامن با سود تضمینی! تماس 09121234567 لغو 11"
+        )
+        val result = classifier.classify(sms)
+
+        assertEquals(SmsVerdict.SPAM, result.verdict)
+        assertEquals(SpamCategory.SPAM_NUISANCE, result.category)
+        assertNull(result.extractedDiscountCode)
+    }
+
+    @Test
+    fun `discount code extractor rejects bare 4-8 digit numeric codes after generic code cue`() {
+        assertNull(DiscountCodeExtractor.extract("Your code: 482910"))
+        assertEquals("SAVE30", DiscountCodeExtractor.extract("Use code: SAVE30 for discount"))
+        assertEquals("123456", DiscountCodeExtractor.extract("کد تخفیف: 123456"))
     }
 
     @Test

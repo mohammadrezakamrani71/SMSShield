@@ -14,15 +14,28 @@ data class ParsedSmsNotification(
 
 object NotificationParser {
 
-    val TARGET_SMS_PACKAGES = setOf(
+    val SMS_PACKAGES = setOf(
         "com.google.android.apps.messaging",
         "com.samsung.android.messaging",
-        "com.android.mms"
+        "com.android.mms",
+        "com.android.messaging",
+        "com.oneplus.mms",
+        "com.motorola.messaging",
+        "com.sonyericsson.conversations",
+        "com.miui.mms",
+        "org.fossify.messages",
+        "com.simplemobiletools.smsmessenger",
+        "com.moez.QKSMS",
+        "com.textra",
+        "xyz.klinker.messenger"
     )
+
+    val TARGET_SMS_PACKAGES: Set<String>
+        get() = SMS_PACKAGES
 
     fun parse(sbn: StatusBarNotification): ParsedSmsNotification? {
         val packageName = sbn.packageName ?: return null
-        if (packageName !in TARGET_SMS_PACKAGES) return null
+        if (packageName !in SMS_PACKAGES) return null
 
         val notification = sbn.notification ?: return null
         if ((notification.flags and Notification.FLAG_GROUP_SUMMARY) != 0) {

@@ -38,7 +38,9 @@ data class QuarantineEntity(
     val timestamp: Long,
     val wasDismissed: Boolean,
     val isFalsePositive: Boolean = false,
-    val feedbackState: String = QuarantineFeedbackState.UNREVIEWED
+    val feedbackState: String = QuarantineFeedbackState.UNREVIEWED,
+    val category: String = "SPAM_NUISANCE",
+    val discountCode: String? = null
 )
 
 @Entity(tableName = "whitelist_senders")

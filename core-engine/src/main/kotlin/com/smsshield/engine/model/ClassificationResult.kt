@@ -5,5 +5,7 @@ data class ClassificationResult(
     val score: Int,
     val reasons: List<String>,
     val matchedCustomKeywords: List<String> = emptyList(),
-    val matchedBlockedSenderPattern: String? = null
+    val matchedBlockedSenderPattern: String? = null,
+    val category: SpamCategory = SpamCategory.NONE,
+    val extractedDiscountCode: String? = null
 )

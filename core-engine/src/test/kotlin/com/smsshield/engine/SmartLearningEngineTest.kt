@@ -1,7 +1,9 @@
 package com.smsshield.engine
 
 import com.smsshield.engine.learning.AdaptiveSpamLearner
+import com.smsshield.engine.learning.PersianTokenizer
 import com.smsshield.engine.learning.SampleLabel
+import com.smsshield.engine.learning.TokenSentiment
 import com.smsshield.engine.learning.TrainingSampleInput
 import com.smsshield.engine.model.SmsInput
 import com.smsshield.engine.model.SmsVerdict
@@ -16,7 +18,7 @@ class SmartLearningEngineTest {
 
     @Test
     fun `tokenizer removes Persian stop-words and numeric tokens so OTP digits are never learned`() {
-        val tokens = com.smsshield.engine.learning.PersianTokenizer.tokenize(
+        val tokens = PersianTokenizer.tokenize(
             "سلام مشتری گرامی کد ۴۸۲۹۱۰ برای شما با مبلغ ۵۰۰۰۰۰ ارسال شد کلینیک زیبایی"
         )
 
@@ -157,7 +159,80 @@ class SmartLearningEngineTest {
 
         assertTrue(report.behavioralInsights.any { it.contains("لینک") && it.contains("۷۵٪") })
         assertTrue(report.behavioralInsights.any { it.contains("لغو ۱۱") && it.contains("۵۰٪") })
+        assertTrue(report.behavioralInsights.any { it.contains("۳۰۰۰") && it.contains("۱۰۰٪") })
         assertFalse("کلینیک زیبایی" in report.suggestedKeywords)
         assertTrue(report.suggestedKeywords.isNotEmpty())
+    }
+
+    @Test
+    fun `extracts sender-pattern behavioral features and reports sender percentages in Persian digits`() {
+        val f3000 = PersianTokenizer.extractFeatures("30001234", "فروش ویژه")
+        val f5000 = PersianTokenizer.extractFeatures("5000999", "تخفیف")
+        val fAlpha = PersianTokenizer.extractFeatures("Digikala", "پیشنهاد")
+        val fMobile = PersianTokenizer.extractFeatures("09121234567", "سلام")
+
+        assertTrue(PersianTokenizer.BEHAVIOR_SENDER_GATEWAY_3000 in f3000)
+        assertTrue(PersianTokenizer.BEHAVIOR_SENDER_GATEWAY_5000 in f5000)
+        assertTrue(PersianTokenizer.BEHAVIOR_SENDER_ALPHANUMERIC in fAlpha)
+        assertTrue(PersianTokenizer.BEHAVIOR_SENDER_MOBILE in fMobile)
+
+        val samples = listOf(
+            TrainingSampleInput("30001111", "تبلیغ اول", SampleLabel.SPAM),
+            TrainingSampleInput("30002222", "تبلیغ دوم", SampleLabel.SPAM),
+            TrainingSampleInput("30003333", "تبلیغ سوم", SampleLabel.SPAM),
+            TrainingSampleInput("50004444", "تبلیغ چهارم", SampleLabel.SPAM),
+            TrainingSampleInput("50005555", "تبلیغ پنجم", SampleLabel.SPAM)
+        )
+        val (_, report) = AdaptiveSpamLearner.train(samples)
+        assertTrue(report.behavioralInsights.any { it.contains("۶۰٪") && it.contains("سرشماره ۳۰۰۰") })
+        assertTrue(report.behavioralInsights.any { it.contains("۴۰٪") && it.contains("سرشماره ۵۰۰۰") })
+    }
+
+    @Test
+    fun `mixed-sender detector flags brands and dual-label senders but allows pure bulk spam gateways`() {
+        assertTrue(AdaptiveSpamLearner.isLikelyMixedSender("Digikala"))
+        assertTrue(AdaptiveSpamLearner.isLikelyMixedSender("Snapp"))
+        assertTrue(AdaptiveSpamLearner.isLikelyMixedSender("7007"))
+
+        val dualSamples = listOf(
+            TrainingSampleInput("50004000111", "فروش ویژه", SampleLabel.SPAM),
+            TrainingSampleInput("50004000111", "سفارش شما تحویل شد", SampleLabel.SAFE)
+        )
+        assertTrue(AdaptiveSpamLearner.isLikelyMixedSender("50004000111", dualSamples))
+
+        val spamOnlySamples = listOf(
+            TrainingSampleInput("50004000111", "فروش ویژه", SampleLabel.SPAM)
+        )
+        assertFalse(AdaptiveSpamLearner.isLikelyMixedSender("50004000111", spamOnlySamples))
+    }
+
+    @Test
+    fun `inspectMessageTokens labels spam-leaning, safe-leaning, neutral tokens and flags custom rules`() {
+        val samples = listOf(
+            TrainingSampleInput("50001", "بوتاکس تخصصی زیبایی", SampleLabel.SPAM),
+            TrainingSampleInput("50002", "بوتاکس تخصصی ارزان", SampleLabel.SPAM),
+            TrainingSampleInput("50003", "بوتاکس تخصصی فوری", SampleLabel.SPAM),
+            TrainingSampleInput("9121111111", "هماهنگی جلسه دانشگاه", SampleLabel.SAFE),
+            TrainingSampleInput("9122222222", "هماهنگی پروژه دانشگاه", SampleLabel.SAFE)
+        )
+        val (model, _) = AdaptiveSpamLearner.train(samples)
+
+        val customRules = listOf(
+            CustomKeywordRule(keyword = "زیبایی", weight = 25, isEnabled = true)
+        )
+
+        val inspected = AdaptiveSpamLearner.inspectMessageTokens(
+            body = "بوتاکس زیبایی سفارش دانشگاه کلمهخنثی",
+            model = model,
+            customRules = customRules
+        )
+
+        val byToken = inspected.associateBy { it.token }
+        assertEquals(TokenSentiment.SPAM_LEANING, byToken["بوتاکس"]?.sentiment)
+        assertEquals(TokenSentiment.SPAM_LEANING, byToken["زیبایی"]?.sentiment)
+        assertEquals(true, byToken["زیبایی"]?.isAlreadyCustomRule)
+        assertEquals(TokenSentiment.SAFE_LEANING, byToken["سفارش"]?.sentiment)
+        assertEquals(TokenSentiment.SAFE_LEANING, byToken["دانشگاه"]?.sentiment)
+        assertEquals(TokenSentiment.NEUTRAL, byToken["کلمهخنثی"]?.sentiment)
     }
 }

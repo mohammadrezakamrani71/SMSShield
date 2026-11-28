@@ -8,6 +8,7 @@ import com.smsshield.app.data.database.QuarantineFeedbackState
 import com.smsshield.engine.SpamClassifier
 import com.smsshield.engine.model.SmsInput
 import com.smsshield.engine.model.SmsVerdict
+import com.smsshield.engine.model.SpamCategory
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -21,6 +22,16 @@ class SmsNotificationListener : NotificationListenerService() {
     private val classifier = SpamClassifier()
     private val dismissalTracker = PendingDismissalTracker()
 
+    override fun onListenerConnected() {
+        super.onListenerConnected()
+        (application as? SmsShieldApplication)?.preferences?.setListenerConnected(true)
+    }
+
+    override fun onListenerDisconnected() {
+        super.onListenerDisconnected()
+        (application as? SmsShieldApplication)?.preferences?.setListenerConnected(false)
+    }
+
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
         if (sbn == null) return
 
@@ -28,6 +39,7 @@ class SmsNotificationListener : NotificationListenerService() {
         val sbnPostTime = sbn.postTime
         val capturedToken = dismissalTracker.recordNotification(sbnKey)
 
+        // Only parse and record diagnostics for recognized SMS_PACKAGES (never non-SMS apps)
         val parsed = NotificationParser.parse(sbn) ?: return
 
         val app = application as? SmsShieldApplication ?: return
@@ -77,6 +89,16 @@ class SmsNotificationListener : NotificationListenerService() {
             )
 
             if (result.verdict == SmsVerdict.SAFE) {
+                val safeOutcome = if (parsed.isPossiblyTruncated) {
+                    "متن اعلان بریده/ناقص بود (برای ایمنی نادیده گرفته شد)"
+                } else {
+                    "امن تشخیص داده شد و به قرنطینه نرفت (امتیاز ${result.score})"
+                }
+                preferences.recordSmsDiagnostic(
+                    packageName = parsed.packageName,
+                    timestamp = parsed.timestamp,
+                    outcome = safeOutcome
+                )
                 return@launch
             }
 
@@ -116,10 +138,28 @@ class SmsNotificationListener : NotificationListenerService() {
                 timestamp = parsed.timestamp,
                 wasDismissed = shouldDismiss,
                 isFalsePositive = false,
-                feedbackState = QuarantineFeedbackState.UNREVIEWED
+                feedbackState = QuarantineFeedbackState.UNREVIEWED,
+                category = result.category.name,
+                discountCode = result.extractedDiscountCode
             )
 
             repository.insertQuarantine(entity)
+
+            val categoryLabel = when {
+                result.category == SpamCategory.OFFER -> "تخفیف"
+                result.verdict == SmsVerdict.SUSPICIOUS -> "مشکوک"
+                else -> "تبلیغاتی"
+            }
+            val outcome = if (shouldDismiss) {
+                "قرنطینه شد ($categoryLabel • امتیاز ${result.score})"
+            } else {
+                "ثبت شد در حالت یادگیری ($categoryLabel • امتیاز ${result.score})"
+            }
+            preferences.recordSmsDiagnostic(
+                packageName = parsed.packageName,
+                timestamp = parsed.timestamp,
+                outcome = outcome
+            )
 
             if (shouldDismiss) {
                 cancelNotification(sbnKey)
