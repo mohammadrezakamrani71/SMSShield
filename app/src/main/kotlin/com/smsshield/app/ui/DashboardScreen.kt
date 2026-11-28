@@ -39,6 +39,30 @@ fun DashboardScreen(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
+        // Community Slogan Banner
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.tertiaryContainer
+            )
+        ) {
+            Column(modifier = Modifier.padding(14.dp)) {
+                Text(
+                    text = AppIdentity.APP_SLOGAN_FA,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "صددرصد آفلاین، بدون دسترسی پیامک و اینترنت — با یادگیری هوشمند روی گوشی شما.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer
+                )
+            }
+        }
+
+        // Notification Access Status Card
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(
@@ -81,6 +105,7 @@ fun DashboardScreen(
             }
         }
 
+        // Learning Mode vs Active Mode Toggle Card
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(
@@ -117,6 +142,7 @@ fun DashboardScreen(
             }
         }
 
+        // Counters Row
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(10.dp)

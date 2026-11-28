@@ -1,8 +1,9 @@
 package com.smsshield.app.data.database
 
 import android.app.Application
-import android.database.sqlite.SQLiteDatabase
 import androidx.room.Room
+import androidx.sqlite.db.SupportSQLiteDatabase
+import androidx.sqlite.db.SupportSQLiteOpenHelper
 import androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory
 import com.smsshield.engine.BlockedSenderItem
 import com.smsshield.engine.KeywordRuleItem
@@ -47,25 +48,25 @@ class RoomMigrationAndRepositoryTest {
         val dbName = "migration_test_v2_to_v3.db"
         context.deleteDatabase(dbName)
 
-        val helperConfig = androidx.sqlite.db.SupportSQLiteOpenHelper.Configuration.builder(context)
+        val helperConfig = SupportSQLiteOpenHelper.Configuration.builder(context)
             .name(dbName)
-            .callback(object : androidx.sqlite.db.SupportSQLiteOpenHelper.Callback(2) {
-                override fun onCreate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+            .callback(object : SupportSQLiteOpenHelper.Callback(2) {
+                override fun onCreate(db: SupportSQLiteDatabase) {
                     db.execSQL(
-                        "CREATE TABLE IF NOT EXISTS `custom_rules` (" +
-                            "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
-                            "`keyword` TEXT NOT NULL, " +
-                            "`weight` INTEGER NOT NULL, " +
-                            "`isEnabled` INTEGER NOT NULL)"
+                        "CREATE TABLE IF NOT EXISTS custom_rules (" +
+                            "id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                            "keyword TEXT NOT NULL, " +
+                            "weight INTEGER NOT NULL, " +
+                            "isEnabled INTEGER NOT NULL)"
                     )
                     db.execSQL(
-                        "INSERT INTO `custom_rules` (`keyword`, `weight`, `isEnabled`) " +
+                        "INSERT INTO custom_rules (keyword, weight, isEnabled) " +
                             "VALUES ('وام فوری', 30, 1)"
                     )
                 }
 
                 override fun onUpgrade(
-                    db: androidx.sqlite.db.SupportSQLiteDatabase,
+                    db: SupportSQLiteDatabase,
                     oldVersion: Int,
                     newVersion: Int
                 ) = Unit
@@ -95,6 +96,129 @@ class RoomMigrationAndRepositoryTest {
 
         supportDb.close()
         context.deleteDatabase(dbName)
+    }
+
+    @Test
+    fun `MIGRATION_3_4 migrates quarantine feedbackState and creates training_samples and learned_features`() {
+        val context = RuntimeEnvironment.getApplication()
+        val dbName = "migration_test_v3_to_v4.db"
+        context.deleteDatabase(dbName)
+
+        val helperConfig = SupportSQLiteOpenHelper.Configuration.builder(context)
+            .name(dbName)
+            .callback(object : SupportSQLiteOpenHelper.Callback(3) {
+                override fun onCreate(db: SupportSQLiteDatabase) {
+                    db.execSQL(
+                        "CREATE TABLE IF NOT EXISTS quarantine_messages (" +
+                            "id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                            "dedupKey TEXT NOT NULL, " +
+                            "contentHash TEXT NOT NULL, " +
+                            "packageName TEXT NOT NULL, " +
+                            "sender TEXT NOT NULL, " +
+                            "body TEXT NOT NULL, " +
+                            "score INTEGER NOT NULL, " +
+                            "verdict TEXT NOT NULL, " +
+                            "reasonsJson TEXT NOT NULL, " +
+                            "timestamp INTEGER NOT NULL, " +
+                            "wasDismissed INTEGER NOT NULL, " +
+                            "isFalsePositive INTEGER NOT NULL)"
+                    )
+                    db.execSQL(
+                        "INSERT INTO quarantine_messages (dedupKey, contentHash, packageName, sender, body, score, verdict, reasonsJson, timestamp, wasDismissed, isFalsePositive) " +
+                            "VALUES ('k1', 'h1', 'pkg', '30001', 'safe msg', 80, 'SPAM', '[]', 1000, 1, 1)"
+                    )
+                    db.execSQL(
+                        "INSERT INTO quarantine_messages (dedupKey, contentHash, packageName, sender, body, score, verdict, reasonsJson, timestamp, wasDismissed, isFalsePositive) " +
+                            "VALUES ('k2', 'h2', 'pkg', '30002', 'spam msg', 90, 'SPAM', '[]', 2000, 1, 0)"
+                    )
+                }
+
+                override fun onUpgrade(
+                    db: SupportSQLiteDatabase,
+                    oldVersion: Int,
+                    newVersion: Int
+                ) = Unit
+            })
+            .build()
+
+        val supportDb = FrameworkSQLiteOpenHelperFactory().create(helperConfig).writableDatabase
+        AppDatabase.MIGRATION_3_4.migrate(supportDb)
+
+        supportDb.query("SELECT dedupKey, feedbackState FROM quarantine_messages ORDER BY id ASC").use { cursor ->
+            assertTrue(cursor.moveToFirst())
+            assertEquals("k1", cursor.getString(0))
+            assertEquals("FALSE_POSITIVE", cursor.getString(1))
+            assertTrue(cursor.moveToNext())
+            assertEquals("k2", cursor.getString(0))
+            assertEquals("UNREVIEWED", cursor.getString(1))
+        }
+
+        supportDb.execSQL(
+            "INSERT INTO training_samples (contentHash, sender, body, label, source, createdAt) " +
+                "VALUES ('th1', '30001', 'کلینیک زیبایی', 'SPAM', 'MANUAL', 1700000000000)"
+        )
+        supportDb.execSQL(
+            "INSERT INTO learned_features (featureKey, featureType, spamDocCount, safeDocCount, weight, updatedAt) " +
+                "VALUES ('کلینیک زیبایی', 'BIGRAM', 3, 0, 1.8, 1700000000000)"
+        )
+
+        supportDb.query("SELECT COUNT(*) FROM training_samples").use { cursor ->
+            assertTrue(cursor.moveToFirst())
+            assertEquals(1, cursor.getInt(0))
+        }
+        supportDb.query("SELECT COUNT(*) FROM learned_features").use { cursor ->
+            assertTrue(cursor.moveToFirst())
+            assertEquals(1, cursor.getInt(0))
+        }
+
+        supportDb.close()
+        context.deleteDatabase(dbName)
+    }
+
+    @Test
+    fun `quarantine feedback transitions are reversible and never lock whitelist or delete`() = runTest {
+        val insertedId = repository.insertQuarantine(
+            QuarantineEntity(
+                dedupKey = "dk1",
+                contentHash = "ch1",
+                packageName = "com.google.android.apps.messaging",
+                sender = "+9830005555",
+                body = "پیامک نمونه برای تست بازخورد",
+                score = 80,
+                verdict = "SPAM",
+                reasonsJson = "[]",
+                timestamp = 1_700_000_000_000L,
+                wasDismissed = true
+            )
+        )
+
+        // 1. Mark FALSE_POSITIVE
+        repository.setQuarantineFeedback(insertedId, QuarantineFeedbackState.FALSE_POSITIVE)
+        var msg = repository.observeQuarantineMessages().first().first()
+        assertEquals(QuarantineFeedbackState.FALSE_POSITIVE, msg.feedbackState)
+        assertTrue(msg.isFalsePositive)
+        assertEquals(1, repository.observeTrainingSamples().first().size)
+
+        // 2. Switch freely to CONFIRMED_SPAM
+        repository.setQuarantineFeedback(insertedId, QuarantineFeedbackState.CONFIRMED_SPAM)
+        msg = repository.observeQuarantineMessages().first().first()
+        assertEquals(QuarantineFeedbackState.CONFIRMED_SPAM, msg.feedbackState)
+        assertFalse(msg.isFalsePositive)
+        assertEquals("SPAM", repository.observeTrainingSamples().first().first().label)
+
+        // 3. Revert to UNREVIEWED (removes auto-sample)
+        repository.setQuarantineFeedback(insertedId, QuarantineFeedbackState.UNREVIEWED)
+        msg = repository.observeQuarantineMessages().first().first()
+        assertEquals(QuarantineFeedbackState.UNREVIEWED, msg.feedbackState)
+        assertTrue(repository.observeTrainingSamples().first().isEmpty())
+
+        // 4. Independent sender whitelist still works cleanly
+        repository.addWhitelistedSender(msg.sender, msg.sender)
+        assertTrue("30005555" in repository.getWhitelistedSenderSet())
+
+        // 5. Delete quarantine message cleanly
+        repository.deleteQuarantineMessageById(insertedId)
+        assertTrue(repository.observeQuarantineMessages().first().isEmpty())
     }
 
     @Test
@@ -144,8 +268,9 @@ class RoomMigrationAndRepositoryTest {
         repository.addBlockedSender("550021*", SenderMatchType.PREFIX)
         repository.addWhitelistedSender("30009999", "Bank")
 
-        val backup = repository.exportFullBackup(spamThreshold = 80)
+        val backup = repository.exportFullBackup(spamThreshold = 80, themeMode = ThemeMode.DARK)
         assertEquals(80, backup.spamThreshold)
+        assertEquals("DARK", backup.themeMode)
         assertEquals(1, backup.customRules.size)
         assertEquals(1, backup.blockedSenders.size)
         assertEquals(1, backup.whitelistSenders.size)
@@ -155,6 +280,7 @@ class RoomMigrationAndRepositoryTest {
         assertEquals(0, restoreSummary.addedKeywords)
         assertEquals(0, restoreSummary.addedBlockedSenders)
         assertEquals(0, restoreSummary.addedWhitelist)
+        assertEquals(ThemeMode.DARK, restoreSummary.restoredThemeMode)
         assertEquals(2, repository.getEnabledCustomRules().size)
     }
 }

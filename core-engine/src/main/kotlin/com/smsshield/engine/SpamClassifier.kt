@@ -1,5 +1,6 @@
 package com.smsshield.engine
 
+import com.smsshield.engine.learning.LearnedModelSnapshot
 import com.smsshield.engine.model.BlockedSenderRule
 import com.smsshield.engine.model.ClassificationResult
 import com.smsshield.engine.model.SenderMatchType
@@ -15,7 +16,8 @@ class SpamClassifier(
         whitelistedSenders: Set<String> = emptySet(),
         customRules: List<CustomKeywordRule> = emptyList(),
         spamThreshold: Int = SpamRules.DEFAULT_SPAM_THRESHOLD,
-        blockedSenders: List<BlockedSenderRule> = emptyList()
+        blockedSenders: List<BlockedSenderRule> = emptyList(),
+        learnedModel: LearnedModelSnapshot? = null
     ): ClassificationResult {
         val normalizedSender = PersianNormalizer.normalizeSender(input.sender)
         val normalizedBody = PersianNormalizer.normalize(input.body)
@@ -56,7 +58,7 @@ class SpamClassifier(
             }
         }
 
-        // Precedence 3: Truncation safety guard
+        // Precedence 3: Truncation safety guard (never overridden by learnedModel)
         if (input.isPossiblyTruncated) {
             return ClassificationResult(
                 verdict = SmsVerdict.SAFE,
@@ -65,6 +67,7 @@ class SpamClassifier(
             )
         }
 
+        // Precedence 4: OTP Exception (never overridden by learnedModel)
         if (isSafeOtp(normalizedBody)) {
             return ClassificationResult(
                 verdict = SmsVerdict.SAFE,
@@ -73,6 +76,7 @@ class SpamClassifier(
             )
         }
 
+        // Precedence 5: Bank Transaction Exception (never overridden by learnedModel)
         if (isSafeBankTransaction(normalizedBody)) {
             return ClassificationResult(
                 verdict = SmsVerdict.SAFE,
@@ -81,10 +85,12 @@ class SpamClassifier(
             )
         }
 
+        // Layer 3 & 4: Weighted scoring + optional adaptive learning delta
         val breakdown = scoringEngine.evaluate(
             normalizedSender = normalizedSender,
             normalizedBody = normalizedBody,
-            customRules = customRules
+            customRules = customRules,
+            learnedModel = learnedModel
         )
 
         val suspiciousThreshold = maxOf(1, spamThreshold - SpamRules.SUSPICIOUS_OFFSET)

@@ -23,6 +23,14 @@ data class BlockedSenderItem(
 )
 
 @Serializable
+data class TrainingSampleBackupItem(
+    val sender: String = "",
+    val body: String,
+    val label: String,
+    val source: String = "MANUAL"
+)
+
+@Serializable
 data class RulePack(
     val schemaVersion: Int = 1,
     val packName: String,
@@ -36,12 +44,14 @@ data class RulePack(
 
 @Serializable
 data class FullBackupData(
-    val schemaVersion: Int = 1,
+    val schemaVersion: Int = 2,
     val exportedAt: Long,
     val spamThreshold: Int,
     val customRules: List<KeywordRuleItem>,
     val blockedSenders: List<BlockedSenderItem>,
-    val whitelistSenders: List<String>
+    val whitelistSenders: List<String>,
+    val themeMode: String = "SYSTEM",
+    val trainingSamples: List<TrainingSampleBackupItem> = emptyList()
 )
 
 object RulePackCodec {
@@ -154,12 +164,32 @@ object RulePackCodec {
                 val norm = PersianNormalizer.normalizeSender(it)
                 norm.isNotEmpty() && seenWhitelist.add(norm)
             }
+        val cleanTheme = backup.themeMode.trim().uppercase().let {
+            if (it in setOf("SYSTEM", "LIGHT", "DARK")) it else "SYSTEM"
+        }
+        val cleanSamples = backup.trainingSamples
+            .mapNotNull { sample ->
+                val body = sample.body.trim()
+                val label = sample.label.trim().uppercase()
+                if (body.isEmpty() || label !in setOf("SPAM", "SAFE")) {
+                    null
+                } else {
+                    TrainingSampleBackupItem(
+                        sender = sample.sender.trim(),
+                        body = body,
+                        label = label,
+                        source = sample.source.trim().ifEmpty { "MANUAL" }
+                    )
+                }
+            }
         return backup.copy(
             schemaVersion = maxOf(1, backup.schemaVersion),
             spamThreshold = backup.spamThreshold.coerceIn(50, 100),
             customRules = sanitizeKeywords(backup.customRules),
             blockedSenders = sanitizeBlockedSenders(backup.blockedSenders),
-            whitelistSenders = cleanWhitelist
+            whitelistSenders = cleanWhitelist,
+            themeMode = cleanTheme,
+            trainingSamples = cleanSamples
         )
     }
 

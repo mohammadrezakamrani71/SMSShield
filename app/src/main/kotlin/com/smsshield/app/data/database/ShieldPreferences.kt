@@ -6,6 +6,12 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
+enum class ThemeMode {
+    SYSTEM,
+    LIGHT,
+    DARK
+}
+
 class ShieldPreferences(context: Context) {
 
     private val prefs = context.applicationContext.getSharedPreferences(
@@ -18,6 +24,9 @@ class ShieldPreferences(context: Context) {
 
     private val _spamThreshold = MutableStateFlow(getSpamThreshold())
     val spamThresholdFlow: StateFlow<Int> = _spamThreshold.asStateFlow()
+
+    private val _themeMode = MutableStateFlow(getThemeMode())
+    val themeModeFlow: StateFlow<ThemeMode> = _themeMode.asStateFlow()
 
     fun isActiveMode(): Boolean = prefs.getBoolean(KEY_ACTIVE_MODE, false)
 
@@ -36,9 +45,20 @@ class ShieldPreferences(context: Context) {
         _spamThreshold.value = clamped
     }
 
+    fun getThemeMode(): ThemeMode {
+        val stored = prefs.getString(KEY_THEME_MODE, ThemeMode.SYSTEM.name) ?: ThemeMode.SYSTEM.name
+        return runCatching { ThemeMode.valueOf(stored) }.getOrDefault(ThemeMode.SYSTEM)
+    }
+
+    fun setThemeMode(mode: ThemeMode) {
+        prefs.edit().putString(KEY_THEME_MODE, mode.name).apply()
+        _themeMode.value = mode
+    }
+
     companion object {
         private const val PREFS_NAME = "smsshield_prefs"
         private const val KEY_ACTIVE_MODE = "is_active_mode"
         private const val KEY_SPAM_THRESHOLD = "spam_threshold"
+        private const val KEY_THEME_MODE = "theme_mode"
     }
 }
