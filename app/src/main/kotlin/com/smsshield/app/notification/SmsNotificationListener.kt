@@ -4,6 +4,7 @@ import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import com.smsshield.app.SmsShieldApplication
 import com.smsshield.app.data.database.QuarantineEntity
+import com.smsshield.app.data.database.QuarantineFeedbackState
 import com.smsshield.engine.SpamClassifier
 import com.smsshield.engine.model.SmsInput
 import com.smsshield.engine.model.SmsVerdict
@@ -58,6 +59,7 @@ class SmsNotificationListener : NotificationListenerService() {
             val whitelistedSenders = repository.getWhitelistedSenderSet()
             val blockedSenders = repository.getBlockedSenderRules()
             val customRules = repository.getEnabledCustomRules()
+            val learnedModel = repository.getLearnedModelSnapshot()
             val spamThreshold = preferences.getSpamThreshold()
             val isActiveMode = preferences.isActiveMode()
 
@@ -70,7 +72,8 @@ class SmsNotificationListener : NotificationListenerService() {
                 whitelistedSenders = whitelistedSenders,
                 customRules = customRules,
                 spamThreshold = spamThreshold,
-                blockedSenders = blockedSenders
+                blockedSenders = blockedSenders,
+                learnedModel = learnedModel
             )
 
             if (result.verdict == SmsVerdict.SAFE) {
@@ -112,7 +115,8 @@ class SmsNotificationListener : NotificationListenerService() {
                 reasonsJson = reasonsJson,
                 timestamp = parsed.timestamp,
                 wasDismissed = shouldDismiss,
-                isFalsePositive = false
+                isFalsePositive = false,
+                feedbackState = QuarantineFeedbackState.UNREVIEWED
             )
 
             repository.insertQuarantine(entity)

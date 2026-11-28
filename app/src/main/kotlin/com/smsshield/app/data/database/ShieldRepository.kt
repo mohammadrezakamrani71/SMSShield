@@ -7,6 +7,14 @@ import com.smsshield.engine.FullBackupData
 import com.smsshield.engine.KeywordRuleItem
 import com.smsshield.engine.PersianNormalizer
 import com.smsshield.engine.RulePackCodec
+import com.smsshield.engine.TrainingSampleBackupItem
+import com.smsshield.engine.learning.AdaptiveSpamLearner
+import com.smsshield.engine.learning.FeatureType
+import com.smsshield.engine.learning.LearnedFeature
+import com.smsshield.engine.learning.LearnedModelSnapshot
+import com.smsshield.engine.learning.LearningReport
+import com.smsshield.engine.learning.SampleLabel
+import com.smsshield.engine.learning.TrainingSampleInput
 import com.smsshield.engine.model.BlockedSenderRule
 import com.smsshield.engine.model.SenderMatchType
 import kotlinx.coroutines.flow.Flow
@@ -23,7 +31,9 @@ data class BackupRestoreSummary(
     val addedKeywords: Int,
     val addedBlockedSenders: Int,
     val addedWhitelist: Int,
-    val restoredThreshold: Int
+    val addedTrainingSamples: Int,
+    val restoredThreshold: Int,
+    val restoredThemeMode: ThemeMode
 )
 
 class ShieldRepository(
@@ -34,6 +44,8 @@ class ShieldRepository(
     private val whitelistDao = database.whitelistDao()
     private val customRuleDao = database.customRuleDao()
     private val blockedSenderDao = database.blockedSenderDao()
+    private val trainingSampleDao = database.trainingSampleDao()
+    private val learnedFeatureDao = database.learnedFeatureDao()
 
     fun observeQuarantineMessages(): Flow<List<QuarantineEntity>> =
         quarantineDao.observeAll()
@@ -62,8 +74,53 @@ class ShieldRepository(
     suspend fun insertQuarantine(entity: QuarantineEntity): Long =
         quarantineDao.insert(entity)
 
-    suspend fun markFalsePositive(id: Long) =
-        quarantineDao.markFalsePositive(id)
+    suspend fun markFalsePositive(id: Long) {
+        setQuarantineFeedback(id, QuarantineFeedbackState.FALSE_POSITIVE)
+    }
+
+    suspend fun setQuarantineFeedback(id: Long, newState: String): LearningReport? {
+        val item = quarantineDao.getById(id) ?: return null
+        val isFalsePos = newState == QuarantineFeedbackState.FALSE_POSITIVE
+        quarantineDao.updateFeedbackState(id, newState, isFalsePos)
+
+        val sampleHash = buildTrainingSampleHash(item.sender, item.body)
+        when (newState) {
+            QuarantineFeedbackState.CONFIRMED_SPAM -> {
+                trainingSampleDao.upsert(
+                    TrainingSampleEntity(
+                        contentHash = sampleHash,
+                        sender = item.sender,
+                        body = item.body,
+                        label = SampleLabel.SPAM.name,
+                        source = TrainingSampleSource.QUARANTINE_CONFIRM,
+                        createdAt = System.currentTimeMillis()
+                    )
+                )
+            }
+            QuarantineFeedbackState.FALSE_POSITIVE -> {
+                trainingSampleDao.upsert(
+                    TrainingSampleEntity(
+                        contentHash = sampleHash,
+                        sender = item.sender,
+                        body = item.body,
+                        label = SampleLabel.SAFE.name,
+                        source = TrainingSampleSource.QUARANTINE_FALSE_POSITIVE,
+                        createdAt = System.currentTimeMillis()
+                    )
+                )
+            }
+            else -> {
+                trainingSampleDao.deleteByContentHash(sampleHash)
+            }
+        }
+        return retrainAdaptiveModel()
+    }
+
+    suspend fun deleteQuarantineMessageById(id: Long) =
+        quarantineDao.deleteById(id)
+
+    suspend fun clearAllQuarantine() =
+        quarantineDao.deleteAll()
 
     fun observeWhitelistedSenders(): Flow<List<WhitelistEntity>> =
         whitelistDao.observeAll()
@@ -179,6 +236,110 @@ class ShieldRepository(
             customHits + blockedHits
         }
 
+    // Smart Learning Samples & Model Persistence
+    fun observeTrainingSamples(): Flow<List<TrainingSampleEntity>> =
+        trainingSampleDao.observeAll()
+
+    fun observeLearnedFeatures(): Flow<List<LearnedFeatureEntity>> =
+        learnedFeatureDao.observeAll()
+
+    suspend fun addTrainingSamples(
+        bodies: List<String>,
+        sender: String = "",
+        label: SampleLabel,
+        source: String
+    ): Int {
+        var added = 0
+        val now = System.currentTimeMillis()
+        for (rawBody in bodies) {
+            val cleanedBody = rawBody.trim()
+            if (cleanedBody.isEmpty()) continue
+            val hash = buildTrainingSampleHash(sender, cleanedBody)
+            trainingSampleDao.upsert(
+                TrainingSampleEntity(
+                    contentHash = hash,
+                    sender = sender.trim(),
+                    body = cleanedBody,
+                    label = label.name,
+                    source = source,
+                    createdAt = now + added
+                )
+            )
+            added++
+        }
+        return added
+    }
+
+    suspend fun deleteTrainingSample(id: Long): LearningReport {
+        trainingSampleDao.deleteById(id)
+        return retrainAdaptiveModel()
+    }
+
+    suspend fun retrainAdaptiveModel(): LearningReport {
+        val samples = trainingSampleDao.getAll().map { entity ->
+            val label = runCatching { SampleLabel.valueOf(entity.label) }
+                .getOrDefault(SampleLabel.SPAM)
+            TrainingSampleInput(
+                sender = entity.sender,
+                body = entity.body,
+                label = label
+            )
+        }
+        val existingKeywords = customRuleDao.getAllRules().map { it.keyword }.toSet()
+        val (snapshot, report) = AdaptiveSpamLearner.train(samples, existingKeywords)
+
+        val now = System.currentTimeMillis()
+        val featureEntities = snapshot.features.values.map { feature ->
+            LearnedFeatureEntity(
+                featureKey = feature.key,
+                featureType = feature.type.name,
+                spamDocCount = feature.spamDocCount,
+                safeDocCount = feature.safeDocCount,
+                weight = feature.weight,
+                updatedAt = now
+            )
+        }
+        learnedFeatureDao.replaceAll(featureEntities)
+        return report
+    }
+
+    suspend fun getLearnedModelSnapshot(): LearnedModelSnapshot? {
+        val samples = trainingSampleDao.getAll()
+        if (samples.isEmpty()) return null
+        val totalSpam = samples.count { it.label == SampleLabel.SPAM.name }
+        val totalSafe = samples.count { it.label == SampleLabel.SAFE.name }
+
+        val storedFeatures = learnedFeatureDao.getAll()
+        if (storedFeatures.isEmpty()) {
+            val existingKeywords = customRuleDao.getAllRules().map { it.keyword }.toSet()
+            val inputs = samples.map {
+                TrainingSampleInput(
+                    sender = it.sender,
+                    body = it.body,
+                    label = runCatching { SampleLabel.valueOf(it.label) }.getOrDefault(SampleLabel.SPAM)
+                )
+            }
+            return AdaptiveSpamLearner.train(inputs, existingKeywords).first
+        }
+
+        val featureMap = storedFeatures.associate { entity ->
+            val type = runCatching { FeatureType.valueOf(entity.featureType) }
+                .getOrDefault(FeatureType.UNIGRAM)
+            entity.featureKey to LearnedFeature(
+                key = entity.featureKey,
+                type = type,
+                spamDocCount = entity.spamDocCount,
+                safeDocCount = entity.safeDocCount,
+                weight = entity.weight
+            )
+        }
+        return LearnedModelSnapshot(
+            totalSpamSamples = totalSpam,
+            totalSafeSamples = totalSafe,
+            features = featureMap
+        )
+    }
+
     suspend fun importSelectedPackItems(
         keywords: List<KeywordRuleItem>,
         blockedSenders: List<BlockedSenderItem>
@@ -219,7 +380,10 @@ class ShieldRepository(
         )
     }
 
-    suspend fun exportFullBackup(spamThreshold: Int): FullBackupData {
+    suspend fun exportFullBackup(
+        spamThreshold: Int,
+        themeMode: ThemeMode = ThemeMode.SYSTEM
+    ): FullBackupData {
         val rules = customRuleDao.getAllRules().map {
             KeywordRuleItem(keyword = it.keyword, weight = it.weight)
         }
@@ -229,14 +393,24 @@ class ShieldRepository(
             BlockedSenderItem(pattern = it.displayPattern, matchType = matchType)
         }
         val whitelist = whitelistDao.getAll().map { it.normalizedSender }
+        val samples = trainingSampleDao.getAll().map {
+            TrainingSampleBackupItem(
+                sender = it.sender,
+                body = it.body,
+                label = it.label,
+                source = it.source
+            )
+        }
 
         return FullBackupData(
-            schemaVersion = 1,
+            schemaVersion = 2,
             exportedAt = System.currentTimeMillis(),
             spamThreshold = spamThreshold.coerceIn(50, 100),
             customRules = rules,
             blockedSenders = blocked,
-            whitelistSenders = whitelist
+            whitelistSenders = whitelist,
+            themeMode = themeMode.name,
+            trainingSamples = samples
         )
     }
 
@@ -253,11 +427,43 @@ class ShieldRepository(
             addWhitelistedSender(sender, sender)
             addedWhitelist++
         }
+
+        val existingSampleHashes = trainingSampleDao.getAll().map { it.contentHash }.toMutableSet()
+        var addedSamples = 0
+        for (sample in backup.trainingSamples) {
+            val hash = buildTrainingSampleHash(sample.sender, sample.body)
+            if (!existingSampleHashes.add(hash)) continue
+            val label = runCatching { SampleLabel.valueOf(sample.label) }.getOrDefault(SampleLabel.SPAM)
+            addTrainingSamples(
+                bodies = listOf(sample.body),
+                sender = sample.sender,
+                label = label,
+                source = sample.source
+            )
+            addedSamples++
+        }
+        if (addedSamples > 0) {
+            retrainAdaptiveModel()
+        }
+
+        val themeMode = runCatching { ThemeMode.valueOf(backup.themeMode) }
+            .getOrDefault(ThemeMode.SYSTEM)
+
         return BackupRestoreSummary(
             addedKeywords = packResult.addedKeywords,
             addedBlockedSenders = packResult.addedBlockedSenders,
             addedWhitelist = addedWhitelist,
-            restoredThreshold = backup.spamThreshold.coerceIn(50, 100)
+            addedTrainingSamples = addedSamples,
+            restoredThreshold = backup.spamThreshold.coerceIn(50, 100),
+            restoredThemeMode = themeMode
+        )
+    }
+
+    private fun buildTrainingSampleHash(sender: String, body: String): String {
+        return DeduplicationHelper.buildContentHash(
+            packageName = "training_sample",
+            sender = sender,
+            body = body
         )
     }
 }

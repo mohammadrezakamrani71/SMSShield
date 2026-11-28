@@ -6,17 +6,25 @@ import androidx.lifecycle.viewModelScope
 import com.smsshield.app.data.database.BackupRestoreSummary
 import com.smsshield.app.data.database.BlockedSenderEntity
 import com.smsshield.app.data.database.CustomRuleEntity
+import com.smsshield.app.data.database.LearnedFeatureEntity
 import com.smsshield.app.data.database.PackImportSummary
 import com.smsshield.app.data.database.QuarantineEntity
+import com.smsshield.app.data.database.QuarantineFeedbackState
 import com.smsshield.app.data.database.ShieldPreferences
 import com.smsshield.app.data.database.ShieldRepository
+import com.smsshield.app.data.database.ThemeMode
+import com.smsshield.app.data.database.TrainingSampleEntity
 import com.smsshield.app.data.database.WhitelistEntity
 import com.smsshield.engine.BlockedSenderItem
 import com.smsshield.engine.KeywordRuleItem
 import com.smsshield.engine.RulePackCodec
+import com.smsshield.engine.learning.LearningReport
+import com.smsshield.engine.learning.SampleLabel
 import com.smsshield.engine.model.SenderMatchType
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.util.Calendar
@@ -35,6 +43,7 @@ class ShieldViewModel(
 
     val isActiveMode: StateFlow<Boolean> = preferences.isActiveModeFlow
     val spamThreshold: StateFlow<Int> = preferences.spamThresholdFlow
+    val themeMode: StateFlow<ThemeMode> = preferences.themeModeFlow
 
     val blockedTodayCount: StateFlow<Int> = repository
         .observeBlockedTodayCount(startOfTodayMillis)
@@ -68,6 +77,23 @@ class ShieldViewModel(
         .observeTotalUserHits()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
 
+    val trainingSamples: StateFlow<List<TrainingSampleEntity>> = repository
+        .observeTrainingSamples()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val learnedFeatures: StateFlow<List<LearnedFeatureEntity>> = repository
+        .observeLearnedFeatures()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    private val _learningReport = MutableStateFlow<LearningReport?>(null)
+    val learningReport: StateFlow<LearningReport?> = _learningReport.asStateFlow()
+
+    init {
+        viewModelScope.launch {
+            _learningReport.value = repository.retrainAdaptiveModel()
+        }
+    }
+
     fun setActiveMode(active: Boolean) {
         preferences.setActiveMode(active)
     }
@@ -76,9 +102,33 @@ class ShieldViewModel(
         preferences.setSpamThreshold(threshold)
     }
 
-    fun markNotSpam(messageId: Long) {
+    fun setThemeMode(mode: ThemeMode) {
+        preferences.setThemeMode(mode)
+    }
+
+    fun toggleQuarantineFeedback(message: QuarantineEntity, targetState: String) {
+        val nextState = if (message.feedbackState == targetState) {
+            QuarantineFeedbackState.UNREVIEWED
+        } else {
+            targetState
+        }
         viewModelScope.launch {
-            repository.markFalsePositive(messageId)
+            val report = repository.setQuarantineFeedback(message.id, nextState)
+            if (report != null) {
+                _learningReport.value = report
+            }
+        }
+    }
+
+    fun deleteQuarantineMessage(messageId: Long) {
+        viewModelScope.launch {
+            repository.deleteQuarantineMessageById(messageId)
+        }
+    }
+
+    fun clearAllQuarantine() {
+        viewModelScope.launch {
+            repository.clearAllQuarantine()
         }
     }
 
@@ -109,6 +159,9 @@ class ShieldViewModel(
     fun addCustomRule(keyword: String, weight: Int) {
         viewModelScope.launch {
             repository.addCustomRule(keyword, weight)
+            if (_learningReport.value != null) {
+                _learningReport.value = repository.retrainAdaptiveModel()
+            }
         }
     }
 
@@ -118,8 +171,39 @@ class ShieldViewModel(
         }
     }
 
+    suspend fun addTrainingSamples(
+        bodies: List<String>,
+        sender: String,
+        label: SampleLabel,
+        source: String
+    ): Int {
+        val added = repository.addTrainingSamples(
+            bodies = bodies,
+            sender = sender,
+            label = label,
+            source = source
+        )
+        _learningReport.value = repository.retrainAdaptiveModel()
+        return added
+    }
+
+    fun deleteTrainingSample(id: Long) {
+        viewModelScope.launch {
+            _learningReport.value = repository.deleteTrainingSample(id)
+        }
+    }
+
+    suspend fun runSmartTraining(): LearningReport {
+        val report = repository.retrainAdaptiveModel()
+        _learningReport.value = report
+        return report
+    }
+
     suspend fun exportBackupJson(): String {
-        val data = repository.exportFullBackup(preferences.getSpamThreshold())
+        val data = repository.exportFullBackup(
+            spamThreshold = preferences.getSpamThreshold(),
+            themeMode = preferences.getThemeMode()
+        )
         return RulePackCodec.encodeBackupToJson(data)
     }
 
@@ -127,6 +211,8 @@ class ShieldViewModel(
         return RulePackCodec.decodeBackupFromJson(rawJson).mapCatching { backup ->
             val summary = repository.restoreFullBackup(backup)
             preferences.setSpamThreshold(summary.restoredThreshold)
+            preferences.setThemeMode(summary.restoredThemeMode)
+            _learningReport.value = repository.retrainAdaptiveModel()
             summary
         }
     }

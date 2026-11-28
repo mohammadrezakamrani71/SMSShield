@@ -1,5 +1,9 @@
 package com.smsshield.engine
 
+import com.smsshield.engine.learning.AdaptiveSpamLearner
+import com.smsshield.engine.learning.LearnedModelSnapshot
+import com.smsshield.engine.model.SmsInput
+
 data class ScoreBreakdown(
     val totalScore: Int,
     val reasons: List<String>,
@@ -11,7 +15,8 @@ class ScoringEngine {
     fun evaluate(
         normalizedSender: String,
         normalizedBody: String,
-        customRules: List<CustomKeywordRule> = emptyList()
+        customRules: List<CustomKeywordRule> = emptyList(),
+        learnedModel: LearnedModelSnapshot? = null
     ): ScoreBreakdown {
         var score = 0
         val reasons = mutableListOf<String>()
@@ -78,6 +83,30 @@ class ScoringEngine {
         if (matchedServiceWord != null) {
             score += SpamRules.SERVICE_NEGATIVE_WEIGHT
             reasons += "کلیدواژه خدماتی معتبر «$matchedServiceWord» (${SpamRules.SERVICE_NEGATIVE_WEIGHT})"
+        }
+
+        if (learnedModel != null) {
+            val adaptive = AdaptiveSpamLearner.evaluate(
+                input = SmsInput(sender = normalizedSender, body = normalizedBody),
+                model = learnedModel
+            )
+            if (adaptive.scoreDelta != 0) {
+                score += adaptive.scoreDelta
+                val patternText = adaptive.matchedPatterns.joinToString("، ")
+                reasons += if (adaptive.scoreDelta > 0) {
+                    if (patternText.isNotEmpty()) {
+                        "یادگیری هوشمند (+${adaptive.scoreDelta}): $patternText"
+                    } else {
+                        "یادگیری هوشمند (+${adaptive.scoreDelta})"
+                    }
+                } else {
+                    if (patternText.isNotEmpty()) {
+                        "اصلاح یادگیری هوشمند (${adaptive.scoreDelta}): $patternText"
+                    } else {
+                        "اصلاح یادگیری هوشمند (${adaptive.scoreDelta}): الگوی پیام امن"
+                    }
+                }
+            }
         }
 
         val boundedScore = score.coerceIn(0, SpamRules.MAX_TOTAL_SCORE)

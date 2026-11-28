@@ -2,4 +2,5 @@
 <resources>
     <string name="app_name">سپر پیامک</string>
     <string name="listener_service_label">سرویس فیلتر اعلان سپر پیامک</string>
+    <string name="share_to_smart_learning">ارسال به یادگیری هوشمند سپر پیامک</string>
 </resources>

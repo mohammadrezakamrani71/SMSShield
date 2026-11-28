@@ -26,6 +26,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -69,6 +70,8 @@ fun PacksScreen(
     blockedSenders: List<BlockedSenderEntity>,
     pendingPreviewPack: RulePack?,
     packStatusMessage: String?,
+    prefilledStudioKeywords: List<String> = emptyList(),
+    onConsumePrefilledStudio: () -> Unit = {},
     onOpenPackFile: () -> Unit,
     onSelectPackForPreview: (RulePack) -> Unit,
     onDismissPreview: () -> Unit,
@@ -81,6 +84,15 @@ fun PacksScreen(
     var showPasteDialog by remember { mutableStateOf(false) }
     var pasteInput by remember { mutableStateOf("") }
     var showStudioDialog by remember { mutableStateOf(false) }
+    var studioExtraKeywords by remember { mutableStateOf<List<String>>(emptyList()) }
+
+    LaunchedEffect(prefilledStudioKeywords) {
+        if (prefilledStudioKeywords.isNotEmpty()) {
+            studioExtraKeywords = prefilledStudioKeywords
+            showStudioDialog = true
+            onConsumePrefilledStudio()
+        }
+    }
 
     val existingNormalizedKeywords = remember(customRules) {
         customRules.map { PersianNormalizer.normalize(it.keyword) }.toSet()
@@ -124,6 +136,12 @@ fun PacksScreen(
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold
                 )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = AppIdentity.APP_SLOGAN_FA,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.SemiBold
+                )
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
                     text = "رتبه فعلی شما: ${shieldContributorRank(totalUserHits)}",
@@ -137,7 +155,10 @@ fun PacksScreen(
                 )
                 Spacer(modifier = Modifier.height(12.dp))
                 Button(
-                    onClick = { showStudioDialog = true },
+                    onClick = {
+                        studioExtraKeywords = emptyList()
+                        showStudioDialog = true
+                    },
                     enabled = customRules.isNotEmpty() || blockedSenders.isNotEmpty()
                 ) {
                     Text("ساخت و انتشار پک من")
@@ -145,7 +166,7 @@ fun PacksScreen(
                 if (customRules.isEmpty() && blockedSenders.isEmpty()) {
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = "برای ساخت پک، ابتدا حداقل یک کلیدواژه سفارشی یا سرشماره مسدودشده در تنظیمات اضافه کنید.",
+                        text = "برای ساخت پک، ابتدا حداقل یک کلیدواژه سفارشی یا سرشماره مسدودشده اضافه کنید.",
                         style = MaterialTheme.typography.bodySmall
                     )
                 }
@@ -263,7 +284,6 @@ fun PacksScreen(
         }
     }
 
-    // Paste Share Code / JSON Dialog
     if (showPasteDialog) {
         AlertDialog(
             onDismissRequest = { showPasteDialog = false },
@@ -301,7 +321,6 @@ fun PacksScreen(
         )
     }
 
-    // Mandatory Selective Checkbox Preview Dialog
     if (pendingPreviewPack != null) {
         PackSelectivePreviewDialog(
             pack = pendingPreviewPack,
@@ -312,12 +331,12 @@ fun PacksScreen(
         )
     }
 
-    // Gamified Pack Creation & Publishing Studio Dialog
     if (showStudioDialog) {
         PackStudioDialog(
             totalUserHits = totalUserHits,
             customRules = customRules,
             blockedSenders = blockedSenders,
+            extraDiscoveredKeywords = studioExtraKeywords,
             onDismiss = { showStudioDialog = false },
             onSavePackJson = { fileName, json ->
                 showStudioDialog = false
@@ -509,6 +528,7 @@ private fun PackStudioDialog(
     totalUserHits: Int,
     customRules: List<CustomRuleEntity>,
     blockedSenders: List<BlockedSenderEntity>,
+    extraDiscoveredKeywords: List<String>,
     onDismiss: () -> Unit,
     onSavePackJson: (fileName: String, jsonContent: String) -> Unit,
     onCopyShareCode: (String) -> Unit,
@@ -524,6 +544,11 @@ private fun PackStudioDialog(
             customRules.forEach { put(it.id, true) }
         }
     }
+    val selectedExtraKeywords = remember(extraDiscoveredKeywords) {
+        mutableStateMapOf<String, Boolean>().apply {
+            extraDiscoveredKeywords.forEach { put(it, true) }
+        }
+    }
     val selectedSenderIds = remember(blockedSenders) {
         mutableStateMapOf<Long, Boolean>().apply {
             blockedSenders.forEach { put(it.id, true) }
@@ -533,7 +558,10 @@ private fun PackStudioDialog(
     fun buildPackOrNull(): RulePack? {
         val keywords = customRules
             .filter { selectedRuleIds[it.id] == true }
-            .map { KeywordRuleItem(it.keyword, it.weight) }
+            .map { KeywordRuleItem(it.keyword, it.weight) } +
+            extraDiscoveredKeywords
+                .filter { selectedExtraKeywords[it] == true }
+                .map { KeywordRuleItem(it, 25) }
         val senders = blockedSenders
             .filter { selectedSenderIds[it.id] == true }
             .map {
@@ -597,6 +625,19 @@ private fun PackStudioDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
 
+                if (extraDiscoveredKeywords.isNotEmpty()) {
+                    Text("الگوهای کشف‌شده توسط یادگیری هوشمند:", style = MaterialTheme.typography.titleSmall)
+                    extraDiscoveredKeywords.forEach { kw ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(
+                                checked = selectedExtraKeywords[kw] == true,
+                                onCheckedChange = { selectedExtraKeywords[kw] = it }
+                            )
+                            Text("$kw (25)")
+                        }
+                    }
+                }
+
                 if (customRules.isNotEmpty()) {
                     Text("انتخاب کلیدواژه‌ها:", style = MaterialTheme.typography.titleSmall)
                     customRules.forEach { rule ->
@@ -645,6 +686,9 @@ private fun PackStudioDialog(
                             appendLine("```")
                             appendLine(shareCode)
                             appendLine("```")
+                            appendLine()
+                            appendLine("---")
+                            appendLine("*${AppIdentity.APP_SLOGAN_FA} — SMSShield*")
                         }
                         onPublishToCommunity(markdown)
                     },
@@ -672,7 +716,7 @@ private fun PackStudioDialog(
                         onClick = {
                             val pack = buildPackOrNull() ?: return@OutlinedButton
                             val safeName = pack.packName
-                                .replace(Regex("[^a-zA-Z0-9\\u0600-\\u06FF_-]+"), "-")
+                                .replace(Regex("[^a-zA-Z0-9\u0600-\u06FF_-]+"), "-")
                                 .trim('-')
                                 .ifEmpty { "my-pack" }
                             onSavePackJson("$safeName.smsshield.json", RulePackCodec.encodePackToJson(pack))

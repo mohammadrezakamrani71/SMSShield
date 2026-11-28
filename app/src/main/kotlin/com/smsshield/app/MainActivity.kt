@@ -14,21 +14,26 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.Brightness6
 import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -38,6 +43,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.core.app.NotificationManagerCompat
 import androidx.lifecycle.Lifecycle
@@ -45,15 +51,19 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.smsshield.app.data.database.ThemeMode
 import com.smsshield.app.ui.DashboardScreen
 import com.smsshield.app.ui.PacksScreen
 import com.smsshield.app.ui.QuarantineScreen
 import com.smsshield.app.ui.SettingsScreen
 import com.smsshield.app.ui.ShieldViewModel
+import com.smsshield.app.ui.SmartLearningScreen
+import com.smsshield.app.ui.theme.SMSShieldTheme
 import com.smsshield.engine.RulePack
 import com.smsshield.engine.RulePackCodec
 import com.smsshield.engine.model.SenderMatchType
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -62,18 +72,28 @@ private const val COMMUNITY_PACKS_DISCUSSIONS_URL =
 
 class MainActivity : ComponentActivity() {
 
+    private val incomingSharedTexts = MutableStateFlow<List<String>>(emptyList())
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        handleShareIntent(intent)
+
         val app = application as SmsShieldApplication
 
         setContent {
-            MaterialTheme {
+            val viewModel: ShieldViewModel = viewModel(
+                factory = ShieldViewModel.Factory(app.repository, app.preferences)
+            )
+            val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
+            val pendingShared by incomingSharedTexts.collectAsStateWithLifecycle()
+
+            SMSShieldTheme(themeMode = themeMode) {
                 CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
-                    val viewModel: ShieldViewModel = viewModel(
-                        factory = ShieldViewModel.Factory(app.repository, app.preferences)
-                    )
                     SmsShieldRoot(
                         viewModel = viewModel,
+                        themeMode = themeMode,
+                        pendingSharedTexts = pendingShared,
+                        onConsumePendingShared = { incomingSharedTexts.value = emptyList() },
                         onOpenNotificationSettings = {
                             startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
                         },
@@ -89,18 +109,50 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleShareIntent(intent)
+    }
+
+    private fun handleShareIntent(intent: Intent?) {
+        if (intent == null) return
+        val extracted = when (intent.action) {
+            Intent.ACTION_SEND -> {
+                val text = intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString()?.trim()
+                if (!text.isNullOrEmpty()) listOf(text) else emptyList()
+            }
+            Intent.ACTION_SEND_MULTIPLE -> {
+                val list = intent.getCharSequenceArrayListExtra(Intent.EXTRA_TEXT)
+                    ?.mapNotNull { it?.toString()?.trim()?.takeIf { s -> s.isNotEmpty() } }
+                    ?: intent.getStringArrayListExtra(Intent.EXTRA_TEXT)
+                        ?.mapNotNull { it?.trim()?.takeIf { s -> s.isNotEmpty() } }
+                    ?: emptyList()
+                list
+            }
+            else -> emptyList()
+        }
+        if (extracted.isNotEmpty()) {
+            incomingSharedTexts.value = extracted
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SmsShieldRoot(
     viewModel: ShieldViewModel,
+    themeMode: ThemeMode,
+    pendingSharedTexts: List<String>,
+    onConsumePendingShared: () -> Unit,
     onOpenNotificationSettings: () -> Unit,
     onOpenCommunityDiscussions: () -> Unit
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val scope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
 
     var hasAccess by remember {
         mutableStateOf(
@@ -123,8 +175,16 @@ private fun SmsShieldRoot(
     var selectedTab by remember { mutableIntStateOf(0) }
     var backupStatusMessage by remember { mutableStateOf<String?>(null) }
     var packStatusMessage by remember { mutableStateOf<String?>(null) }
+    var learningStatusMessage by remember { mutableStateOf<String?>(null) }
     var pendingPreviewPack by remember { mutableStateOf<RulePack?>(null) }
     var pendingPackJsonToSave by remember { mutableStateOf<String?>(null) }
+    var prefilledStudioKeywords by remember { mutableStateOf<List<String>>(emptyList()) }
+
+    LaunchedEffect(pendingSharedTexts) {
+        if (pendingSharedTexts.isNotEmpty()) {
+            selectedTab = 2
+        }
+    }
 
     val exportBackupLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/json")
@@ -161,7 +221,8 @@ private fun SmsShieldRoot(
             raw.onSuccess { content ->
                 viewModel.importBackupJson(content).onSuccess { summary ->
                     backupStatusMessage = "بازیابی انجام شد: ${summary.addedKeywords} کلیدواژه، " +
-                        "${summary.addedBlockedSenders} سرشماره مسدود و ${summary.addedWhitelist} لیست مجاز اضافه شد."
+                        "${summary.addedBlockedSenders} سرشماره، ${summary.addedWhitelist} لیست مجاز و " +
+                        "${summary.addedTrainingSamples} نمونه یادگیری اضافه شد."
                 }.onFailure { err ->
                     backupStatusMessage = "فایل پشتیبان نامعتبر است: ${err.message}"
                 }
@@ -226,13 +287,34 @@ private fun SmsShieldRoot(
     val blockedSenders by viewModel.blockedSenders.collectAsStateWithLifecycle()
     val customRules by viewModel.customRules.collectAsStateWithLifecycle()
     val totalUserHits by viewModel.totalUserHits.collectAsStateWithLifecycle()
+    val trainingSamples by viewModel.trainingSamples.collectAsStateWithLifecycle()
+    val learnedFeatures by viewModel.learnedFeatures.collectAsStateWithLifecycle()
+    val learningReport by viewModel.learningReport.collectAsStateWithLifecycle()
 
-    val titles = listOf("داشبورد", "قرنطینه", "پک‌ها", "تنظیمات")
+    val titles = listOf("داشبورد", "قرنطینه", "یادگیری", "پک‌ها", "تنظیمات")
 
     Scaffold(
+        snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         topBar = {
             TopAppBar(
-                title = { Text("سپر پیامک • ${titles[selectedTab]}") }
+                title = { Text("سپر پیامک • ${titles[selectedTab]}") },
+                actions = {
+                    IconButton(
+                        onClick = {
+                            val next = when (themeMode) {
+                                ThemeMode.SYSTEM -> ThemeMode.DARK
+                                ThemeMode.DARK -> ThemeMode.LIGHT
+                                ThemeMode.LIGHT -> ThemeMode.SYSTEM
+                            }
+                            viewModel.setThemeMode(next)
+                        }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Brightness6,
+                            contentDescription = "تغییر پوسته"
+                        )
+                    }
+                }
             )
         },
         bottomBar = {
@@ -241,25 +323,31 @@ private fun SmsShieldRoot(
                     selected = selectedTab == 0,
                     onClick = { selectedTab = 0 },
                     icon = { Icon(Icons.Default.Home, contentDescription = "داشبورد") },
-                    label = { Text("داشبورد") }
+                    label = { Text("داشبورد", maxLines = 1, overflow = TextOverflow.Ellipsis) }
                 )
                 NavigationBarItem(
                     selected = selectedTab == 1,
                     onClick = { selectedTab = 1 },
-                    icon = { Icon(Icons.Default.List, contentDescription = "قرنطینه") },
-                    label = { Text("قرنطینه") }
+                    icon = { Icon(Icons.AutoMirrored.Filled.List, contentDescription = "قرنطینه") },
+                    label = { Text("قرنطینه", maxLines = 1, overflow = TextOverflow.Ellipsis) }
                 )
                 NavigationBarItem(
                     selected = selectedTab == 2,
                     onClick = { selectedTab = 2 },
-                    icon = { Icon(Icons.Default.Star, contentDescription = "پک‌ها") },
-                    label = { Text("پک‌ها") }
+                    icon = { Icon(Icons.Default.Psychology, contentDescription = "یادگیری") },
+                    label = { Text("یادگیری", maxLines = 1, overflow = TextOverflow.Ellipsis) }
                 )
                 NavigationBarItem(
                     selected = selectedTab == 3,
                     onClick = { selectedTab = 3 },
+                    icon = { Icon(Icons.Default.Star, contentDescription = "پک‌ها") },
+                    label = { Text("پک‌ها", maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                )
+                NavigationBarItem(
+                    selected = selectedTab == 4,
+                    onClick = { selectedTab = 4 },
                     icon = { Icon(Icons.Default.Settings, contentDescription = "تنظیمات") },
-                    label = { Text("تنظیمات") }
+                    label = { Text("تنظیمات", maxLines = 1, overflow = TextOverflow.Ellipsis) }
                 )
             }
         }
@@ -277,16 +365,61 @@ private fun SmsShieldRoot(
                 )
                 1 -> QuarantineScreen(
                     messages = quarantineMessages,
-                    onMarkNotSpam = viewModel::markNotSpam,
-                    onAddToWhitelist = { viewModel.whitelistSender(it) },
-                    onBlockSender = { viewModel.addBlockedSender(it, SenderMatchType.EXACT) }
+                    onToggleFeedback = { msg, state ->
+                        viewModel.toggleQuarantineFeedback(msg, state)
+                    },
+                    onAddToWhitelist = { sender ->
+                        viewModel.whitelistSender(sender)
+                        scope.launch {
+                            snackbarHostState.showSnackbar("فرستنده $sender به لیست مجاز اضافه شد.")
+                        }
+                    },
+                    onBlockSender = { sender ->
+                        viewModel.addBlockedSender(sender, SenderMatchType.EXACT)
+                        scope.launch {
+                            snackbarHostState.showSnackbar("سرشماره $sender مسدود شد.")
+                        }
+                    },
+                    onDeleteMessage = viewModel::deleteQuarantineMessage,
+                    onClearAll = viewModel::clearAllQuarantine
                 )
-                2 -> PacksScreen(
+                2 -> SmartLearningScreen(
+                    samples = trainingSamples,
+                    learnedFeatures = learnedFeatures,
+                    report = learningReport,
+                    pendingSharedTexts = pendingSharedTexts,
+                    learningStatusMessage = learningStatusMessage,
+                    onConsumePendingShared = onConsumePendingShared,
+                    onAddSamples = { bodies, sender, label, source ->
+                        scope.launch {
+                            val count = viewModel.addTrainingSamples(bodies, sender, label, source)
+                            learningStatusMessage = "$count نمونه جدید ثبت و مدل هوشمند به‌روزرسانی شد."
+                        }
+                    },
+                    onDeleteSample = viewModel::deleteTrainingSample,
+                    onTrainNow = {
+                        scope.launch {
+                            val reportResult = viewModel.runSmartTraining()
+                            learningStatusMessage = "آموزش کامل شد: ${reportResult.topSpamPhrases.size} الگوی تبلیغاتی شناسایی شد."
+                        }
+                    },
+                    onPromoteKeyword = { keyword ->
+                        viewModel.addCustomRule(keyword, 25)
+                        learningStatusMessage = "کلیدواژه «$keyword» به کلیدواژه‌های سفارشی اضافه شد."
+                    },
+                    onBuildPackFromLearned = { keywords ->
+                        prefilledStudioKeywords = keywords
+                        selectedTab = 3
+                    }
+                )
+                3 -> PacksScreen(
                     totalUserHits = totalUserHits,
                     customRules = customRules,
                     blockedSenders = blockedSenders,
                     pendingPreviewPack = pendingPreviewPack,
                     packStatusMessage = packStatusMessage,
+                    prefilledStudioKeywords = prefilledStudioKeywords,
+                    onConsumePrefilledStudio = { prefilledStudioKeywords = emptyList() },
                     onOpenPackFile = {
                         importPackLauncher.launch(arrayOf("application/json", "text/plain", "*/*"))
                     },
@@ -312,13 +445,15 @@ private fun SmsShieldRoot(
                     onOpenCommunityDiscussions = onOpenCommunityDiscussions,
                     onReportStatus = { msg -> packStatusMessage = msg }
                 )
-                3 -> SettingsScreen(
+                4 -> SettingsScreen(
                     spamThreshold = spamThreshold,
+                    themeMode = themeMode,
                     whitelistedSenders = whitelistedSenders,
                     blockedSenders = blockedSenders,
                     customRules = customRules,
                     backupStatusMessage = backupStatusMessage,
                     onThresholdChange = viewModel::setSpamThreshold,
+                    onThemeModeChange = viewModel::setThemeMode,
                     onAddWhitelist = { viewModel.whitelistSender(it) },
                     onRemoveWhitelist = viewModel::removeWhitelistedSender,
                     onAddBlockedSender = viewModel::addBlockedSender,

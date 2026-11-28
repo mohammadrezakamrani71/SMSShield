@@ -5,6 +5,7 @@ import androidx.room.Delete
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -21,6 +22,9 @@ interface QuarantineDao {
             "WHERE contentHash = :contentHash AND timestamp >= :minTimestamp)"
     )
     suspend fun existsRecentByContentHash(contentHash: String, minTimestamp: Long): Boolean
+
+    @Query("SELECT * FROM quarantine_messages WHERE id = :id LIMIT 1")
+    suspend fun getById(id: Long): QuarantineEntity?
 
     @Query("SELECT * FROM quarantine_messages ORDER BY timestamp DESC")
     fun observeAll(): Flow<List<QuarantineEntity>>
@@ -43,8 +47,17 @@ interface QuarantineDao {
     )
     fun observeSuspiciousCount(): Flow<Int>
 
-    @Query("UPDATE quarantine_messages SET isFalsePositive = 1 WHERE id = :id")
+    @Query("UPDATE quarantine_messages SET isFalsePositive = 1, feedbackState = 'FALSE_POSITIVE' WHERE id = :id")
     suspend fun markFalsePositive(id: Long)
+
+    @Query("UPDATE quarantine_messages SET feedbackState = :feedbackState, isFalsePositive = :isFalsePositive WHERE id = :id")
+    suspend fun updateFeedbackState(id: Long, feedbackState: String, isFalsePositive: Boolean)
+
+    @Query("DELETE FROM quarantine_messages WHERE id = :id")
+    suspend fun deleteById(id: Long)
+
+    @Query("DELETE FROM quarantine_messages")
+    suspend fun deleteAll()
 }
 
 @Dao
@@ -117,4 +130,47 @@ interface BlockedSenderDao {
 
     @Query("SELECT COALESCE(SUM(hitCount), 0) FROM blocked_senders")
     fun observeTotalHits(): Flow<Int>
+}
+
+@Dao
+interface TrainingSampleDao {
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(entity: TrainingSampleEntity): Long
+
+    @Query("DELETE FROM training_samples WHERE id = :id")
+    suspend fun deleteById(id: Long)
+
+    @Query("DELETE FROM training_samples WHERE contentHash = :contentHash")
+    suspend fun deleteByContentHash(contentHash: String)
+
+    @Query("SELECT * FROM training_samples ORDER BY createdAt DESC")
+    fun observeAll(): Flow<List<TrainingSampleEntity>>
+
+    @Query("SELECT * FROM training_samples ORDER BY createdAt DESC")
+    suspend fun getAll(): List<TrainingSampleEntity>
+}
+
+@Dao
+interface LearnedFeatureDao {
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(features: List<LearnedFeatureEntity>)
+
+    @Query("DELETE FROM learned_features")
+    suspend fun deleteAll()
+
+    @Query("SELECT * FROM learned_features")
+    suspend fun getAll(): List<LearnedFeatureEntity>
+
+    @Query("SELECT * FROM learned_features ORDER BY weight DESC")
+    fun observeAll(): Flow<List<LearnedFeatureEntity>>
+
+    @Transaction
+    suspend fun replaceAll(features: List<LearnedFeatureEntity>) {
+        deleteAll()
+        if (features.isNotEmpty()) {
+            insertAll(features)
+        }
+    }
 }

@@ -34,6 +34,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.smsshield.app.data.database.BlockedSenderEntity
 import com.smsshield.app.data.database.CustomRuleEntity
+import com.smsshield.app.data.database.ThemeMode
 import com.smsshield.app.data.database.WhitelistEntity
 import com.smsshield.engine.model.SenderMatchType
 import kotlin.math.roundToInt
@@ -41,11 +42,13 @@ import kotlin.math.roundToInt
 @Composable
 fun SettingsScreen(
     spamThreshold: Int,
+    themeMode: ThemeMode,
     whitelistedSenders: List<WhitelistEntity>,
     blockedSenders: List<BlockedSenderEntity>,
     customRules: List<CustomRuleEntity>,
     backupStatusMessage: String?,
     onThresholdChange: (Int) -> Unit,
+    onThemeModeChange: (ThemeMode) -> Unit,
     onAddWhitelist: (String) -> Unit,
     onRemoveWhitelist: (WhitelistEntity) -> Unit,
     onAddBlockedSender: (String, SenderMatchType) -> Unit,
@@ -68,6 +71,39 @@ fun SettingsScreen(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
+        // Theme Selector (System / Light / Dark)
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text(
+                    text = "پوسته ظاهری برنامه",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    FilterChip(
+                        selected = themeMode == ThemeMode.SYSTEM,
+                        onClick = { onThemeModeChange(ThemeMode.SYSTEM) },
+                        label = { Text("خودکار سیستم") }
+                    )
+                    FilterChip(
+                        selected = themeMode == ThemeMode.LIGHT,
+                        onClick = { onThemeModeChange(ThemeMode.LIGHT) },
+                        label = { Text("روشن") }
+                    )
+                    FilterChip(
+                        selected = themeMode == ThemeMode.DARK,
+                        onClick = { onThemeModeChange(ThemeMode.DARK) },
+                        label = { Text("تاریک") }
+                    )
+                }
+            }
+        }
+
+        // Sensitivity Threshold Slider
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text(
@@ -89,6 +125,7 @@ fun SettingsScreen(
             }
         }
 
+        // Blocked Senders
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text(
@@ -167,6 +204,7 @@ fun SettingsScreen(
             }
         }
 
+        // Whitelisted Senders
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text(
@@ -227,6 +265,7 @@ fun SettingsScreen(
             }
         }
 
+        // Custom Keywords
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text(
@@ -295,6 +334,7 @@ fun SettingsScreen(
             }
         }
 
+        // Local Backup & Restore
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text(
@@ -304,7 +344,7 @@ fun SettingsScreen(
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = "تمام کلیدواژه‌ها، سرشماره‌های مسدودشده، لیست مجاز و حساسیت را به‌صورت فایل JSON روی گوشی ذخیره یا بازیابی کنید (بدون نیاز به اینترنت).",
+                    text = "تمام کلیدواژه‌ها، سرشماره‌های مسدودشده، لیست مجاز، نمونه‌های یادگیری و تنظیمات را به‌صورت فایل JSON ذخیره یا بازیابی کنید.",
                     style = MaterialTheme.typography.bodySmall
                 )
                 Spacer(modifier = Modifier.height(10.dp))
@@ -336,6 +376,7 @@ fun SettingsScreen(
             }
         }
 
+        // Phantom Ding Info Card
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(
