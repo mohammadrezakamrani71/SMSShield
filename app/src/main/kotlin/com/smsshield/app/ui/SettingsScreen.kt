@@ -12,10 +12,13 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -34,8 +37,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.smsshield.app.data.database.BlockedSenderEntity
 import com.smsshield.app.data.database.CustomRuleEntity
+import com.smsshield.app.data.database.ListenerDiagnostics
 import com.smsshield.app.data.database.ThemeMode
 import com.smsshield.app.data.database.WhitelistEntity
+import com.smsshield.app.util.PersianDateFormatter
 import com.smsshield.engine.model.SenderMatchType
 import kotlin.math.roundToInt
 
@@ -47,6 +52,11 @@ fun SettingsScreen(
     blockedSenders: List<BlockedSenderEntity>,
     customRules: List<CustomRuleEntity>,
     backupStatusMessage: String?,
+    hasNotificationAccess: Boolean = false,
+    isIgnoringBatteryOptimizations: Boolean = false,
+    diagnostics: ListenerDiagnostics = ListenerDiagnostics(),
+    onOpenNotificationSettings: () -> Unit = {},
+    onOpenBatteryOptimizationSettings: () -> Unit = {},
     onThresholdChange: (Int) -> Unit,
     onThemeModeChange: (ThemeMode) -> Unit,
     onAddWhitelist: (String) -> Unit,
@@ -71,6 +81,133 @@ fun SettingsScreen(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
+        // Listener Diagnostics & Reliability Card
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(
+                    text = "عیب‌یابی و وضعیت سرویس شنود",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+
+                // 1. Notification Access
+                val listenerHealthy = hasNotificationAccess && diagnostics.isListenerConnected
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "دسترسی اعلان",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        AssistChip(
+                            onClick = onOpenNotificationSettings,
+                            colors = AssistChipDefaults.assistChipColors(
+                                containerColor = if (hasNotificationAccess) {
+                                    MaterialTheme.colorScheme.secondaryContainer
+                                } else {
+                                    MaterialTheme.colorScheme.errorContainer
+                                },
+                                labelColor = if (hasNotificationAccess) {
+                                    MaterialTheme.colorScheme.onSecondaryContainer
+                                } else {
+                                    MaterialTheme.colorScheme.onErrorContainer
+                                }
+                            ),
+                            label = {
+                                Text(
+                                    when {
+                                        listenerHealthy -> "متصل و فعال"
+                                        hasNotificationAccess -> "فعال (در انتظار اتصال سرویس)"
+                                        else -> "غیرفعال یا قطع شده"
+                                    }
+                                )
+                            }
+                        )
+                    }
+                    OutlinedButton(onClick = onOpenNotificationSettings) {
+                        Text("تنظیمات اعلان")
+                    }
+                }
+
+                HorizontalDivider()
+
+                // 2. Battery Optimization
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        text = "بهینه‌سازی باتری",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = if (isIgnoringBatteryOptimizations) {
+                            "بدون محدودیت (عالی)"
+                        } else {
+                            "محدودشده — ممکن است اندروید سرویس را متوقف کند"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (isIgnoringBatteryOptimizations) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.error
+                        }
+                    )
+                    if (!isIgnoringBatteryOptimizations) {
+                        OutlinedButton(onClick = onOpenBatteryOptimizationSettings) {
+                            Text("باز کردن تنظیمات باتری")
+                        }
+                    }
+                }
+
+                HorizontalDivider()
+
+                // 3. Live Listener Stats
+                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Text(
+                        text = "آمار زنده شنود",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = "کل اعلان‌های پیامک بررسی‌شده: ${PersianDateFormatter.toPersianDigits(diagnostics.totalSmsNotificationsSeen.toString())}",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    if (diagnostics.lastSmsPackage.isNotBlank()) {
+                        Text(
+                            text = "آخرین پیام‌رسان: ${diagnostics.lastSmsPackage}",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                    if (diagnostics.lastSmsTimestamp > 0L) {
+                        Text(
+                            text = "زمان آخرین بررسی: ${PersianDateFormatter.formatTimestamp(diagnostics.lastSmsTimestamp)}",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                    if (diagnostics.lastSmsOutcome.isNotBlank()) {
+                        Text(
+                            text = "آخرین نتیجه: ${diagnostics.lastSmsOutcome}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+
+                // 4. Short Hint
+                Text(
+                    text = "نکته: اگر پیام‌رسان خود گوشی پیامکی را بی‌صدا مستقیم به پوشه هرزنامه ببرد، اعلانی صادر نمی‌شود و در سپر پیامک ثبت نخواهد شد.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+
         // Theme Selector (System / Light / Dark)
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp)) {

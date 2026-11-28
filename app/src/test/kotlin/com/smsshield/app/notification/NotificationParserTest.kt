@@ -72,6 +72,35 @@ class NotificationParserTest {
     }
 
     @Test
+    fun `recognizes expanded OEM and third-party SMS packages`() {
+        val packagesToVerify = listOf(
+            "com.android.mms",
+            "com.android.messaging",
+            "com.oneplus.mms",
+            "com.motorola.messaging",
+            "com.sonyericsson.conversations",
+            "com.miui.mms",
+            "org.fossify.messages",
+            "com.simplemobiletools.smsmessenger",
+            "com.moez.QKSMS",
+            "com.textra",
+            "xyz.klinker.messenger"
+        )
+
+        for (pkg in packagesToVerify) {
+            val notification = NotificationCompat.Builder(context, "sms")
+                .setSmallIcon(android.R.drawable.sym_action_chat)
+                .setContentTitle("30001234")
+                .setContentText("تخفیف ویژه بلک فرایدی")
+                .build()
+
+            val parsed = NotificationParser.parse(buildSbn(packageName = pkg, notification = notification))
+            assertNotNull("Expected package $pkg to be recognized", parsed)
+            assertEquals(pkg, parsed!!.packageName)
+        }
+    }
+
+    @Test
     fun `prioritizes MessagingStyle over EXTRA_BIG_TEXT and EXTRA_TEXT`() {
         val me = Person.Builder().setName("Me").build()
         val sender = Person.Builder().setName("30005555").build()

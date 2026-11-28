@@ -13,13 +13,17 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
+import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -32,6 +36,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -40,8 +45,15 @@ import androidx.compose.ui.unit.dp
 import com.smsshield.app.data.database.LearnedFeatureEntity
 import com.smsshield.app.data.database.TrainingSampleEntity
 import com.smsshield.app.data.database.TrainingSampleSource
+import com.smsshield.app.util.PersianDateFormatter
+import com.smsshield.engine.learning.InspectedToken
 import com.smsshield.engine.learning.LearningReport
 import com.smsshield.engine.learning.SampleLabel
+import com.smsshield.engine.learning.TokenSentiment
+import com.smsshield.engine.model.ClassificationResult
+import com.smsshield.engine.model.SmsVerdict
+import com.smsshield.engine.model.SpamCategory
+import kotlinx.coroutines.launch
 
 fun intelligenceLevelLabel(totalSamples: Int): String {
     return when {
@@ -68,18 +80,41 @@ fun SmartLearningScreen(
     report: LearningReport?,
     pendingSharedTexts: List<String>,
     learningStatusMessage: String?,
+    spamThreshold: Int = 75,
+    simulatorOpenTrigger: Int = 0,
     onConsumePendingShared: () -> Unit,
     onAddSamples: (bodies: List<String>, sender: String, label: SampleLabel, source: String) -> Unit,
     onDeleteSample: (Long) -> Unit,
     onTrainNow: () -> Unit,
     onPromoteKeyword: (String) -> Unit,
-    onBuildPackFromLearned: (List<String>) -> Unit
+    onBuildPackFromLearned: (List<String>) -> Unit,
+    onSimulateSms: suspend (sender: String, body: String) -> ClassificationResult = { _, _ ->
+        ClassificationResult(SmsVerdict.SAFE, 0, emptyList())
+    },
+    onInspectTokens: suspend (body: String) -> List<InspectedToken> = { emptyList() },
+    onOpenTapToTeach: (String) -> Unit = {},
+    onCopyDiscountCode: (String) -> Unit = {}
 ) {
+    val scope = rememberCoroutineScope()
+
     var showAddDialog by remember { mutableStateOf(false) }
     var dialogSender by remember { mutableStateOf("") }
     var dialogBody by remember { mutableStateOf("") }
     var dialogLabel by remember { mutableStateOf(SampleLabel.SPAM) }
     var dialogSource by remember { mutableStateOf(TrainingSampleSource.MANUAL) }
+
+    // Live Message Simulator state
+    var simulatorExpanded by remember { mutableStateOf(false) }
+    var simSender by remember { mutableStateOf("") }
+    var simBody by remember { mutableStateOf("") }
+    var simResult by remember { mutableStateOf<ClassificationResult?>(null) }
+    var simTokens by remember { mutableStateOf<List<InspectedToken>>(emptyList()) }
+
+    LaunchedEffect(simulatorOpenTrigger) {
+        if (simulatorOpenTrigger > 0) {
+            simulatorExpanded = true
+        }
+    }
 
     // Automatically open pre-filled dialog when SMS text is shared from native Messages app
     LaunchedEffect(pendingSharedTexts) {
@@ -116,6 +151,216 @@ fun SmartLearningScreen(
                     style = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier.padding(12.dp)
                 )
+            }
+        }
+
+        // Live Message Simulator Card («آزمایش پیامک»)
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
+            )
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "آزمایش پیامک (شبیه‌ساز تشخیص) 🧪",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.weight(1f)
+                    )
+                    TextButton(onClick = { simulatorExpanded = !simulatorExpanded }) {
+                        Text(if (simulatorExpanded) "بستن" else "باز کردن")
+                    }
+                }
+
+                if (simulatorExpanded) {
+                    OutlinedTextField(
+                        value = simSender,
+                        onValueChange = { simSender = it },
+                        label = { Text("فرستنده / سرشماره (اختیاری)") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = simBody,
+                        onValueChange = { simBody = it },
+                        label = { Text("متن پیامک آزمایشی") },
+                        minLines = 3,
+                        maxLines = 6,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                simResult = onSimulateSms(simSender, simBody)
+                                simTokens = onInspectTokens(simBody)
+                            }
+                        },
+                        enabled = simBody.isNotBlank(),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("بررسی و شبیه‌سازی")
+                    }
+
+                    val result = simResult
+                    if (result != null) {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surface
+                            )
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                val verdictLabel = when (result.verdict) {
+                                    SmsVerdict.SPAM -> "تبلیغاتی"
+                                    SmsVerdict.SUSPICIOUS -> "مشکوک"
+                                    SmsVerdict.SAFE -> "امن"
+                                }
+                                val categoryLabel = when (result.category) {
+                                    SpamCategory.OFFER -> "تخفیف"
+                                    SpamCategory.SPAM_NUISANCE -> "مزاحم"
+                                    SpamCategory.NONE -> "امن"
+                                }
+                                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    AssistChip(
+                                        onClick = {},
+                                        colors = AssistChipDefaults.assistChipColors(
+                                            containerColor = when (result.verdict) {
+                                                SmsVerdict.SPAM -> MaterialTheme.colorScheme.errorContainer
+                                                SmsVerdict.SUSPICIOUS -> MaterialTheme.colorScheme.tertiaryContainer
+                                                SmsVerdict.SAFE -> MaterialTheme.colorScheme.secondaryContainer
+                                            }
+                                        ),
+                                        label = { Text("وضعیت: $verdictLabel") }
+                                    )
+                                    AssistChip(
+                                        onClick = {},
+                                        label = { Text("دسته: $categoryLabel") }
+                                    )
+                                    AssistChip(
+                                        onClick = {},
+                                        label = {
+                                            Text(
+                                                "امتیاز ${PersianDateFormatter.toPersianDigits(result.score.toString())} از آستانه ${PersianDateFormatter.toPersianDigits(spamThreshold.toString())}"
+                                            )
+                                        }
+                                    )
+                                }
+
+                                if (result.category == SpamCategory.OFFER && !result.extractedDiscountCode.isNullOrBlank()) {
+                                    AssistChip(
+                                        onClick = { onCopyDiscountCode(result.extractedDiscountCode!!) },
+                                        leadingIcon = {
+                                            Icon(
+                                                imageVector = Icons.Default.ContentCopy,
+                                                contentDescription = "کپی کد تخفیف"
+                                            )
+                                        },
+                                        label = { Text("کپی کد تخفیف: ${result.extractedDiscountCode}") }
+                                    )
+                                }
+
+                                if (result.reasons.isNotEmpty()) {
+                                    Text(
+                                        text = "دلایل امتیازدهی:",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    result.reasons.forEach { reason ->
+                                        Text(
+                                            text = "• $reason",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                } else {
+                                    Text(
+                                        text = "هیچ نشانه تبلیغاتی در این پیامک یافت نشد.",
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                }
+
+                                if (simTokens.isNotEmpty()) {
+                                    HorizontalDivider()
+                                    Text(
+                                        text = "کلمات تشخیص‌داده‌شده (برای افزودن سریع بزنید):",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    FlowRow(
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        simTokens.take(12).forEach { tokenInfo ->
+                                            val chipColors = when (tokenInfo.sentiment) {
+                                                TokenSentiment.SPAM_LEANING -> FilterChipDefaults.filterChipColors(
+                                                    containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.65f),
+                                                    labelColor = MaterialTheme.colorScheme.onErrorContainer
+                                                )
+                                                TokenSentiment.SAFE_LEANING -> FilterChipDefaults.filterChipColors(
+                                                    containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f),
+                                                    labelColor = MaterialTheme.colorScheme.onPrimaryContainer
+                                                )
+                                                TokenSentiment.NEUTRAL -> FilterChipDefaults.filterChipColors(
+                                                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                                    labelColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                            FilterChip(
+                                                selected = tokenInfo.isAlreadyCustomRule,
+                                                onClick = { onPromoteKeyword(tokenInfo.token) },
+                                                colors = chipColors,
+                                                label = { Text(tokenInfo.token) }
+                                            )
+                                        }
+                                    }
+                                }
+
+                                HorizontalDivider()
+                                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    TextButton(onClick = { onOpenTapToTeach(simBody) }) {
+                                        Text("آموزش کلمات 🎯")
+                                    }
+                                    TextButton(
+                                        onClick = {
+                                            onAddSamples(
+                                                listOf(simBody),
+                                                simSender,
+                                                SampleLabel.SPAM,
+                                                TrainingSampleSource.MANUAL
+                                            )
+                                        }
+                                    ) {
+                                        Text("ذخیره به‌عنوان تبلیغاتی")
+                                    }
+                                    TextButton(
+                                        onClick = {
+                                            onAddSamples(
+                                                listOf(simBody),
+                                                simSender,
+                                                SampleLabel.SAFE,
+                                                TrainingSampleSource.MANUAL
+                                            )
+                                        }
+                                    ) {
+                                        Text("ذخیره به‌عنوان امن")
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -310,6 +555,10 @@ fun SmartLearningScreen(
                             text = sample.body,
                             style = MaterialTheme.typography.bodySmall
                         )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        TextButton(onClick = { onOpenTapToTeach(sample.body) }) {
+                            Text("آموزش کلمات 🎯")
+                        }
                     }
                 }
             }

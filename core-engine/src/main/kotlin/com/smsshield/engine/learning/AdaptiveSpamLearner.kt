@@ -1,5 +1,6 @@
 package com.smsshield.engine.learning
 
+import com.smsshield.engine.CustomKeywordRule
 import com.smsshield.engine.PersianNormalizer
 import com.smsshield.engine.SpamRules
 import com.smsshield.engine.model.SmsInput
@@ -13,6 +14,19 @@ object AdaptiveSpamLearner {
     const val MAX_SCORE_DELTA = 35
     const val MIN_SPAM_GATE = 3
     const val MIN_SAFE_GATE = 2
+
+    private val MIXED_SENDER_KEYWORDS = listOf(
+        "bank",
+        "بانک",
+        "snapp",
+        "digikala",
+        "tapsi",
+        "irancell",
+        "mci",
+        "torob",
+        "basalam",
+        "divar"
+    )
 
     private data class FeatureCounters(
         val type: FeatureType,
@@ -149,6 +163,127 @@ object AdaptiveSpamLearner {
         )
     }
 
+    /**
+     * Anti-overblocking guardrail: detects whether a sender likely sends both important service/OTP
+     * messages and promotional SMS so the UI can warn the user before blocking the entire sender.
+     */
+    fun isLikelyMixedSender(
+        sender: String,
+        samples: List<TrainingSampleInput> = emptyList()
+    ): Boolean {
+        val normalized = PersianNormalizer.normalizeSender(sender)
+        if (normalized.isEmpty()) return false
+
+        // 1. Appears in BOTH SPAM and SAFE training samples
+        var hasSpam = false
+        var hasSafe = false
+        for (sample in samples) {
+            if (PersianNormalizer.normalizeSender(sample.sender) == normalized) {
+                if (sample.label == SampleLabel.SPAM) hasSpam = true
+                if (sample.label == SampleLabel.SAFE) hasSafe = true
+                if (hasSpam && hasSafe) return true
+            }
+        }
+
+        // 2. Alphanumeric brand/service sender (e.g., Digikala, Snapp, Mellat)
+        if (normalized.any { it.isLetter() }) {
+            return true
+        }
+
+        // 3. Short service code (4-6 digits)
+        if (normalized.all { it.isDigit() } && normalized.length in 4..6) {
+            return true
+        }
+
+        // 4. Contains bank/service keywords
+        val normalizedText = PersianNormalizer.normalize(sender)
+        if (MIXED_SENDER_KEYWORDS.any { normalizedText.contains(it) }) {
+            return true
+        }
+
+        return false
+    }
+
+    /**
+     * Inspects tokens (and high-value bigrams) in a message body for interactive Tap-to-Teach UI.
+     */
+    fun inspectMessageTokens(
+        body: String,
+        model: LearnedModelSnapshot? = null,
+        customRules: List<CustomKeywordRule> = emptyList()
+    ): List<InspectedToken> {
+        val tokens = PersianTokenizer.tokenize(body)
+        if (tokens.isEmpty()) return emptyList()
+
+        val normalizedCustomKeywords = customRules
+            .filter { it.isEnabled }
+            .map { PersianNormalizer.normalize(it.keyword) }
+            .filter { it.isNotEmpty() }
+            .toSet()
+
+        val normalizedSafeKeywords = SpamRules.SERVICE_SAFE_KEYWORDS
+            .map { PersianNormalizer.normalize(it) }
+            .filter { it.isNotEmpty() }
+
+        val candidates = LinkedHashSet<String>()
+
+        // Include high-value bigrams if present in custom rules, built-in promo rules, or learned model
+        for (i in 0 until tokens.size - 1) {
+            val bigram = "${tokens[i]} ${tokens[i + 1]}"
+            val inCustom = bigram in normalizedCustomKeywords
+            val inModel = abs(model?.features?.get(bigram)?.weight ?: 0.0) > 0.2
+            val inBuiltIn = SpamRules.PROMO_KEYWORD_RULES.any { it.regex.matches(bigram) }
+            if (inCustom || inModel || inBuiltIn) {
+                candidates += bigram
+            }
+        }
+
+        for (token in tokens) {
+            candidates += token
+        }
+
+        return candidates.map { phrase ->
+            val isCustom = phrase in normalizedCustomKeywords
+            val modelWeight = model?.features?.get(phrase)?.weight ?: 0.0
+            val inBuiltInPromo = SpamRules.PROMO_KEYWORD_RULES.any { it.regex.containsMatchIn(phrase) }
+            val inServiceSafe = normalizedSafeKeywords.any { safeWord ->
+                phrase == safeWord || safeWord.split(" ").contains(phrase)
+            }
+
+            val sentiment = when {
+                isCustom || inBuiltInPromo || modelWeight > 0.2 -> TokenSentiment.SPAM_LEANING
+                inServiceSafe || modelWeight < -0.2 -> TokenSentiment.SAFE_LEANING
+                else -> TokenSentiment.NEUTRAL
+            }
+
+            InspectedToken(
+                token = phrase,
+                sentiment = sentiment,
+                weight = modelWeight,
+                isAlreadyCustomRule = isCustom
+            )
+        }
+    }
+
+    fun formatFeatureForDisplay(key: String): String {
+        return when (key) {
+            PersianTokenizer.BEHAVIOR_HAS_URL -> "لینک تبلیغاتی"
+            PersianTokenizer.BEHAVIOR_HAS_PHONE -> "شماره تماس"
+            PersianTokenizer.BEHAVIOR_HAS_LAGHV11 -> "الگوی لغو ۱۱"
+            PersianTokenizer.BEHAVIOR_BULK_SENDER -> "سرشماره انبوه"
+            PersianTokenizer.BEHAVIOR_PROMO_LONG_MSG -> "متن طولانی"
+            PersianTokenizer.BEHAVIOR_SENDER_GATEWAY_1000 -> "سرشماره ۱۰۰۰"
+            PersianTokenizer.BEHAVIOR_SENDER_GATEWAY_2000 -> "سرشماره ۲۰۰۰"
+            PersianTokenizer.BEHAVIOR_SENDER_GATEWAY_3000 -> "سرشماره ۳۰۰۰"
+            PersianTokenizer.BEHAVIOR_SENDER_GATEWAY_5000 -> "سرشماره ۵۰۰۰"
+            PersianTokenizer.BEHAVIOR_SENDER_GATEWAY_9000 -> "سرشماره ۹۰۰۰"
+            PersianTokenizer.BEHAVIOR_SENDER_SHORTCODE -> "کد کوتاه خدماتی"
+            PersianTokenizer.BEHAVIOR_SENDER_MOBILE -> "شماره موبایل"
+            PersianTokenizer.BEHAVIOR_SENDER_ALPHANUMERIC -> "فرستنده متنی/برند"
+            else -> key
+        }
+    }
+
     private fun computeWeight(
         spamDocCount: Int,
         safeDocCount: Int,
@@ -272,18 +407,23 @@ object AdaptiveSpamLearner {
             "$pct٪ پیامک‌های طولانی تبلیغاتی (بیش از ۱۴۰ کاراکتر) هستند"
         }
 
-        return insights
-    }
+        // Top sender-pattern stats
+        val senderPatternCounts = PersianTokenizer.SENDER_BEHAVIOR_KEYS
+            .mapNotNull { key ->
+                val count = snapshot.features[key]?.spamDocCount ?: 0
+                if (count > 0) key to count else null
+            }
+            .sortedByDescending { it.second }
+            .take(2)
 
-    private fun formatFeatureForDisplay(key: String): String {
-        return when (key) {
-            PersianTokenizer.BEHAVIOR_HAS_URL -> "لینک تبلیغاتی"
-            PersianTokenizer.BEHAVIOR_HAS_PHONE -> "شماره تماس"
-            PersianTokenizer.BEHAVIOR_HAS_LAGHV11 -> "الگوی لغو ۱۱"
-            PersianTokenizer.BEHAVIOR_BULK_SENDER -> "سرشماره انبوه"
-            PersianTokenizer.BEHAVIOR_PROMO_LONG_MSG -> "متن طولانی"
-            else -> key
+        for ((key, count) in senderPatternCounts) {
+            val percent = ((count * 100.0) / totalSpam).roundToInt()
+            val pctFa = toPersianDigits(percent.toString())
+            val label = formatFeatureForDisplay(key)
+            insights += "$pctFa٪ پیامک‌های تبلیغاتی از $label بوده‌اند"
         }
+
+        return insights
     }
 
     private fun toPersianDigits(input: String): String {

@@ -3,11 +3,14 @@ package com.smsshield.engine
 import com.smsshield.engine.learning.AdaptiveSpamLearner
 import com.smsshield.engine.learning.LearnedModelSnapshot
 import com.smsshield.engine.model.SmsInput
+import com.smsshield.engine.model.SpamCategory
 
 data class ScoreBreakdown(
     val totalScore: Int,
     val reasons: List<String>,
-    val matchedCustomKeywords: List<String> = emptyList()
+    val matchedCustomKeywords: List<String> = emptyList(),
+    val matchedOfferRule: Boolean = false,
+    val matchedNuisanceRule: Boolean = false
 )
 
 class ScoringEngine {
@@ -45,6 +48,8 @@ class ScoringEngine {
         var promoScore = 0
         val matchedPromoGroups = mutableSetOf<String>()
         val matchedPromoLabels = mutableListOf<String>()
+        var matchedOfferRule = false
+        var matchedNuisanceRule = false
 
         for (rule in SpamRules.PROMO_KEYWORD_RULES) {
             if (rule.groupId in matchedPromoGroups) continue
@@ -52,6 +57,11 @@ class ScoringEngine {
                 matchedPromoGroups += rule.groupId
                 promoScore += rule.weight
                 matchedPromoLabels += "${rule.label} (+${rule.weight})"
+                when (rule.category) {
+                    SpamCategory.OFFER -> matchedOfferRule = true
+                    SpamCategory.SPAM_NUISANCE -> matchedNuisanceRule = true
+                    SpamCategory.NONE -> Unit
+                }
             }
         }
 
@@ -117,7 +127,9 @@ class ScoringEngine {
         return ScoreBreakdown(
             totalScore = boundedScore,
             reasons = reasons,
-            matchedCustomKeywords = matchedCustomKeywords
+            matchedCustomKeywords = matchedCustomKeywords,
+            matchedOfferRule = matchedOfferRule,
+            matchedNuisanceRule = matchedNuisanceRule
         )
     }
 }

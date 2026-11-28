@@ -14,6 +14,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -30,7 +31,8 @@ fun DashboardScreen(
     totalBlocked: Int,
     suspiciousLogged: Int,
     onOpenNotificationSettings: () -> Unit,
-    onToggleActiveMode: (Boolean) -> Unit
+    onToggleActiveMode: (Boolean) -> Unit,
+    onOpenSimulator: () -> Unit = {}
 ) {
     Column(
         modifier = Modifier
@@ -162,6 +164,29 @@ fun DashboardScreen(
                 value = suspiciousLogged.toString(),
                 modifier = Modifier.weight(1f)
             )
+        }
+
+        // Live Message Simulator Shortcut Card
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text(
+                    text = "آزمایش پیامک (شبیه‌ساز تشخیص) 🧪",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "هر پیامکی را با قوانین واقعی و مدل هوشمند خودتان امتحان کنید و دلایل امتیازدهی را ببینید.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+                OutlinedButton(
+                    onClick = onOpenSimulator,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("باز کردن شبیه‌ساز پیامک")
+                }
+            }
         }
     }
 }
